@@ -61,10 +61,10 @@ An automatic context rewrite is ready. Allow it?
   [ Allow once ]  [ Not now ]  [ Always allow (this session) ]
 ```
 
-And a pill in the composer's tool row — inside the input card, right after the access-mode chip. It carries the mode only; clicking it opens a small menu with the numbers:
+And a chip in the composer's tool row — inside the input card, right after the access-mode chip, built with the same geometry as its siblings (28px pill, design-system glyph, chevron that rotates while open). It carries the mode only; clicking it opens a small menu with the numbers. The glyph follows the mode — a question mark while the guard asks, a check while it runs unprompted — and the label collapses to glyph + chevron in a narrow composer, exactly as the neighbouring chips do.
 
 ```
-[ Cache: ask ]          ╭───────────────────────────────────────────╮
+[ (?) Cache: ask ⌄ ]    ╭───────────────────────────────────────────╮
                         │ Context 837k of 1.05M · rewrite at 839k   │
                         │ last rewrite: 28 tool results pruned ·    │
                         │ 724k re-read in full (declined, nothing   │
@@ -75,7 +75,7 @@ And a pill in the composer's tool row — inside the input card, right after the
                         ╰───────────────────────────────────────────╯
 ```
 
-The long sentence also sits in the pill's tooltip, so hovering shows it without opening the menu. The host keeps the chosen mode per session.
+The long sentence also sits in the chip's tooltip, so hovering shows it without opening the menu. The host keeps the chosen mode per session.
 
 ## Where It Is Active
 
