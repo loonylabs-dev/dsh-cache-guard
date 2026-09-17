@@ -57,7 +57,8 @@ Context rewrite
 An automatic context rewrite is ready. Allow it?
   Context: 839k of 1.05M (rewrite at 839k)
   Prunes 28 old tool results: 93k freed
-  Breaks the cache at position 8: 724k re-read in full (97% of the request)
+  Then summarizes: ~4k checkpoint (estimated) instead of 746k
+  Breaks the cache at position 0: 255k re-read in full (95% of the request)
   [ Allow once ]  [ Not now ]  [ Always allow (this session) ]
 ```
 
@@ -100,19 +101,19 @@ Both operations run through **one** method — `compactIfNeeded` on the live com
 
 The guard therefore:
 
-1. prices the pending plan **before** anything is touched — which tool results are over the pruner's budget (the real pruner's own `pruneContent` decides, without mutating), whether a summarization would follow, and how many tokens break the cache at which surface position;
+1. prices the pending plan **before** anything is touched — which tool results are over the pruner's budget (the real pruner's own `pruneContent` decides, without mutating), which span a summarization would replace, and how many tokens break the cache at which surface position;
 2. asks (manual mode) or reports (auto mode);
-3. calls the original method on accept, or returns `null` on decline — which the engine reads as *nothing to compact*, leaving the surface and the warm cache untouched.
+3. runs the operation itself on accept: the engine's public `compactRegion` transaction **first**, then the pruner. On decline — or when there is nothing to decide — it returns `null`, which the engine reads as *nothing to compact*.
 
-Nothing is imported from the compaction packages and no engine code is changed: the guard reads the engine's public config and the public services of its context, and restores the original method when it unloads.
+**The guard never calls the original method.** That is what keeps the engine from running its own two-phase pass behind the guard's back, and it is why the phases can be paired: the checkpoint lands at the oldest replaced position, so every pruning rewrite that follows sits behind that cache break and adds nothing to it. The reverse order would pay the break twice whenever the summary lands anyway, and would leave a pruned surface behind if the range were rejected. The engine's transaction is atomic, so a rejected range throws before anything is written.
 
-### Pruning never lands alone
+Nothing is imported from the compaction packages and no engine code is changed: the guard reads the engine's public config, calls its public `compactRegion`, and restores the original method when it unloads. Everything the harness owns around the operation — the transaction, the event lifecycle, the persistence, and the retry accounting in the calling listeners — stays the harness's.
 
-The engine tries the model-free pass first: it abbreviates every oversized tool result, then summarizes only if the surface is still above the threshold. A pass that stops there has a bad price. Pruning rewrites in place, so the surface stays almost as large (measured: 839k → 737k) and the next request pays the cache break at nearly full size — 724k tokens re-read cold, for a pass that freed 93k and needed only 186.
+### Pruning and summarizing are one operation
 
-A summarization in the same operation pays that break once, replaces the older span with a checkpoint, leaves a much smaller surface, and even shrinks the summarizer's input by the abbreviation the pruning already did. So the guard **declines any plan whose pruning alone would get below the threshold**, silently: nothing happens, the surface keeps growing, and the guard asks once the pressure has risen far enough that a summarization follows in the same operation. Only then is the decision worth making, and only then does an accepted change pay the cache break once.
+The engine's own pass tries the model-free phase first and summarizes only if the surface is still too large. A pass that stops there has a bad price: pruning rewrites in place, so the surface stays almost as large (measured: 839k → 737k) and the next request pays the cache break at nearly full size — 720,764 tokens re-read cold, for a pass that freed 93k and needed 186.
 
-The consequence is deliberate: a session can run close to its window before the guard asks, and a provider-confirmed overflow then forces the combined operation instead. Pair it with the threshold you want (see [Configuration](#configuration)) — the guard prices both phases either way.
+The guard always plans both. The same session, priced with the span the guard would replace, comes to **255k** cold: the surface drops to the retention tail plus a checkpoint, and the cache break is paid once.
 
 ## Guarantees
 
@@ -202,7 +203,7 @@ dsh web --dump-config | Select-String cache-guard
 - **The checkpoint size is an estimate** — a planned summarization is priced with `estimatedSummaryTokens`, because the real summary does not exist before it runs. Prune numbers are exact, and the plan states which of the two it is.
 - **The per-session mode is process-local.** "Allow automatically for this session" lasts until the harness restarts; a durable record would need a session event type this build knows, which an out-of-repo plugin cannot add.
 - **A declined overflow still ends the turn.** At a provider-confirmed context overflow the window is already exhausted, so declining preserves the original provider error.
-- **The plan mirrors the engine's resolution.** Threshold and retention are recomputed from the public engine config with the documented formulas (`resolveTargetPolicy`, `resolveCompactSpec`), and the routed provider/model come from the durable `request/header` the engine itself reads. A change upstream must be followed here.
+- **The plan mirrors the engine's resolution.** The trigger ratio, the retention budget, the routed provider/model (from the durable `request/header` the engine itself reads), and the safe-cut rule are recomputed here from the public engine config and the session surface — because the guard selects the range it replaces. A change upstream must be followed here; a range the engine rejects leaves the surface untouched and logs the failure.
 - **A session composed without the engine half is not guarded.** The veto lives in the agent preset, so a session started on a preset that lacks the row (the shipped `standard`, for instance) compacts exactly as before. Pick the guarded preset per session, or set the machine-wide default knowing it applies to every profile of that harness home.
 - **A profile with no question provider blocks rather than spends.** With `mode: manual` and nothing to ask, the guard declines and logs it; the session then runs to its window limit. Use `mode: auto` for a headless profile's row.
 - **Everything but the harness vocabulary is English.** Code, comments, docs, dialog copy, and the pill are English; only the harness terms the guard reports (`compaction/prune`, `thresholdRatio`, `retainRatio`) keep their upstream spelling.

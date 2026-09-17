@@ -95,24 +95,31 @@ describe('planChange', () => {
     assert.equal(plan.estimate, null)
   })
 
-  it('prices a prune-only change from the OLDEST rewritten node', () => {
+  it('pairs the span with the pruning as soon as the threshold is reached', () => {
+    // The guard owns the operation, so a plan at the threshold always carries
+    // both phases: pruning alone would leave the surface large and pay the cache
+    // break anyway. 60k prunable + ten 80k nodes + 40k envelope = 900k, the bar.
     const plan = planFor([toolResult(0, 60_000)])
-    assert.equal(plan.kind, 'prune-only')
+    assert.equal(plan.kind, 'prune-and-summarize')
     assert.equal(plan.pruned.length, 1)
     assert.equal(plan.freedByPrune, 59_900)
-    assert.equal(plan.summary, null)
+    assert.ok(plan.summary !== null)
+    // Retention keeps the two newest 80k nodes; the rest becomes a 4k checkpoint.
+    assert.equal(plan.summary.retainedNodes, 2)
     assert.equal(plan.estimate.firstChangedPosition, 0)
-    assert.equal(plan.estimate.coldTokens, 100 + 10 * 80_000)
+    assert.equal(plan.estimate.coldTokens, 4_000 + 2 * 80_000)
     assert.equal(plan.estimate.warmTokens, 40_000)
-    assert.equal(plan.estimate.freedTokens, 59_900)
   })
 
-  it('prices rewriting the NEWEST node at a fraction of the oldest one', () => {
-    const plan = planFor([toolResult(10, 80_000)])
-    assert.equal(plan.kind, 'prune-only')
-    assert.equal(plan.estimate.firstChangedPosition, 10)
-    assert.equal(plan.estimate.coldTokens, 100)
-    assert.equal(plan.estimate.warmTokens, 40_000 + 60_000 + 9 * 80_000)
+  it('breaks the cache once, at the span the guard replaces', () => {
+    // The rewrite positions stop mattering the moment a span is part of the plan:
+    // the checkpoint lands where the replaced span started, which is the earliest
+    // possible change, and everything the pruning touches sits behind it.
+    const oldest = planFor([toolResult(0, 60_000), toolResult(10, 80_000)])
+    const newest = planFor([toolResult(10, 80_000)])
+    assert.equal(oldest.estimate.firstChangedPosition, 0)
+    assert.equal(newest.estimate.firstChangedPosition, 0)
+    assert.equal(oldest.estimate.coldTokens, newest.estimate.coldTokens)
   })
 
   it('adds a summary span when pruning alone stays above the threshold', () => {
@@ -138,11 +145,12 @@ describe('planChange', () => {
     assert.equal(plan.estimate.coldTokens, 4_000 + 80_000)
   })
 
-  it('matches the measured real case once the true fixed part is supplied', () => {
-    // Measured on session-02abdc01 (1M window, deepseek-v4.1-flash): the engine
-    // rewrote 28 old tool results at surface position 8, and the next request
-    // re-read 720,764 tokens at full price. The meter's residual (97,450) is not
-    // the fixed part; the session's cheapest real request (14,215) is.
+  it('keeps the measured two-currency split with a span in the plan', () => {
+    // Measured on session-02abdc01 (1M window, deepseek-v4.1-flash). The two
+    // currencies are the point: the request TOTAL is the harness's own anchored
+    // pressure number, while the warm part comes from positional node prices and
+    // the session's cheapest real request (14,215) as the fixed part. Deriving
+    // the fixed part from the meter's residual (97,450) was 12% wrong.
     const prices = [30_000, ...Array.from({ length: 39 }, () => 18_000)]
     const nodes = priced(prices)
     const surfaceTokens = nodes.reduce((total, node) => total + node.tokens, 0)
@@ -159,12 +167,17 @@ describe('planChange', () => {
       estimatedSummaryTokens: 4_000,
       toolResults: [toolResult(0, 30_000)],
     })
-    assert.equal(plan.kind, 'prune-only')
-    assert.equal(plan.estimate.firstChangedPosition, 0)
-    assert.equal(plan.estimate.warmTokens, 14_215)
-    assert.equal(plan.estimate.totalTokens, 839_046 - (30_000 - 100))
-    assert.equal(plan.estimate.coldTokens, 839_046 - (30_000 - 100) - 14_215)
-    assert.ok(plan.estimate.coldTokens > 700_000, 'the cold read must dominate the request')
+    assert.equal(plan.kind, 'prune-and-summarize')
+    assert.ok(plan.summary !== null, 'the guard always pairs the phases')
+    assert.equal(plan.estimate.firstChangedPosition, 0, 'the checkpoint is the earliest change')
+    assert.equal(plan.estimate.warmTokens, 14_215, 'the fixed request part stays warm')
+    assert.equal(plan.estimate.totalTokens, 839_046 - plan.estimate.freedTokens)
+    assert.equal(plan.estimate.coldTokens, plan.estimate.totalTokens - plan.estimate.warmTokens)
+    assert.ok(plan.estimate.freedTokens > 0.7 * surfaceTokens, 'the span frees most of the surface')
+    // The same session measured 255k cold with the span (tools/simulate-session.mjs)
+    // against the 720,764 tokens the log shows were actually re-read in full,
+    // because the engine's real pass pruned without summarizing.
+    assert.ok(plan.estimate.coldTokens < 300_000, 'and leaves a small request to re-read')
   })
 
   it('still plans a summary when no tool result is over the pruner budget', () => {
