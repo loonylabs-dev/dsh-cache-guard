@@ -83,14 +83,21 @@ window.__ModuleLoader__.load({
       '.cg-item-check svg { width: 16px; height: 16px; }',
     ].join('\n')
 
-    /** Inject the sheet once; the browser half owns its own styling. */
+    /**
+     * Install the sheet, or refresh it when this bundle is a hot replacement of
+     * an older one. Presence alone is not enough: the client-plugin HMR receiver
+     * re-runs `apply` in the same document, so a presence-only guard would pair
+     * new markup with the stylesheet of the bundle it replaced.
+     */
     function ensureStyles() {
       if (typeof document === 'undefined') return
-      if (document.getElementById(STYLE_ID) !== null) return
-      const tag = document.createElement('style')
-      tag.id = STYLE_ID
-      tag.textContent = STYLES
-      document.head.appendChild(tag)
+      let tag = document.getElementById(STYLE_ID)
+      if (tag === null) {
+        tag = document.createElement('style')
+        tag.id = STYLE_ID
+        document.head.appendChild(tag)
+      }
+      if (tag.textContent !== STYLES) tag.textContent = STYLES
     }
 
     /** Render a token count the way the dialog reads it. */
@@ -281,9 +288,10 @@ window.__ModuleLoader__.load({
         }, CacheGuardDock))
       }
       register()
-      // The `inject` declaration should already hold activation back until the
-      // `slots` service exists; retry through both channels anyway so an earlier
-      // arrival cannot leave the dock silently empty.
+      // The `inject` declaration should already hold activation back until `slots`
+      // exists. The fallback retries are deliberately short: they only cover an
+      // earlier arrival, and a long timer would keep the page's module alive for
+      // no benefit (and hold a Node test process open).
       if (!registered) {
         if (typeof ctx.on === 'function') {
           ctx.on('internal/service', name => { if (name === 'slots') register() })
@@ -292,8 +300,8 @@ window.__ModuleLoader__.load({
         const timer = setInterval(() => {
           register()
           attempts += 1
-          if (registered || attempts > 40) clearInterval(timer)
-        }, 250)
+          if (registered || attempts >= 5) clearInterval(timer)
+        }, 200)
       }
       selfTest(registered ? 'registered' : 'noslots')
     }

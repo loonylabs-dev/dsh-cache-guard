@@ -63,6 +63,30 @@ describe('browser half', () => {
     assert.equal(typeof injected.face.refresh, 'function')
   })
 
+  it('refreshes its sheet instead of trusting an older bundle\'s element', () => {
+    // The client-plugin HMR receiver re-runs apply() in the same document, so a
+    // presence-only guard pairs new markup with the replaced bundle's stylesheet.
+    const plugin = captured[0].factory(() => fakeReact)
+    const existing = { id: 'cg-styles', textContent: 'stale sheet' }
+    const created = []
+    globalThis.document = {
+      getElementById: id => (id === 'cg-styles' ? existing : null),
+      createElement: () => { const node = { textContent: '' }; created.push(node); return node },
+      head: { appendChild: () => {} },
+    }
+    try {
+      plugin.apply({
+        get: () => ({ inject: (_slot, callback) => callback(), register: () => () => {} }),
+      })
+      assert.equal(created.length, 0, 'the existing sheet must be reused, never duplicated')
+      assert.notEqual(existing.textContent, 'stale sheet')
+      assert.match(existing.textContent, /\.cg-item \{ display: flex; align-items: flex-start/)
+      assert.match(existing.textContent, /\.cg-item-check \{/)
+    } finally {
+      delete globalThis.document
+    }
+  })
+
   it('does nothing when the slot service is absent', () => {
     const plugin = captured[0].factory(() => fakeReact)
     plugin.apply({ get: () => undefined })
