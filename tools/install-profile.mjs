@@ -4,7 +4,7 @@
  *
  *   node tools/install-profile.mjs [--profile web] [--preset cache-guard]
  *                                  [--source standard] [--app <presets dir>]
- *                                  [--no-default] [--dry-run]
+ *                                  [--set-default | --remove-default] [--dry-run]
  *
  * The written preset is an INCLUDE of the shipped composition plus one patch that
  * inserts the engine row into its `compaction` group — `cordis:include` applies
@@ -12,8 +12,12 @@
  * rows into that group's child list. A harness update to the shipped preset
  * therefore flows through instead of being frozen in a copy.
  *
- * With `--set-default` (the default) the preset also becomes the default for new
- * sessions, so nothing has to be picked by hand.
+ * The preset is available to EVERY profile of the harness home, because the preset
+ * roots and the settings document are shared. `--set-default` writes the
+ * machine-wide `agent-presets.default`; it is opt-in because that value layers over
+ * a profile's own composition default (the studio bundle sets `default: studio`),
+ * so it changes which preset every other profile starts with. `--remove-default`
+ * takes it back.
  *
  * Idempotent: re-running only fills what is missing.
  *
@@ -31,7 +35,8 @@ const flag = (name, fallback) => {
   return index === -1 ? fallback : argv[index + 1]
 }
 const dryRun = argv.includes('--dry-run')
-const setDefault = !argv.includes('--no-default')
+const setDefault = argv.includes('--set-default')
+const removeDefault = argv.includes('--remove-default')
 const profileName = flag('profile', 'web')
 const presetId = flag('preset', 'cache-guard')
 const sourceId = flag('source', 'standard')
@@ -106,21 +111,40 @@ if (includeBased) {
   }
 }
 
-if (!setDefault) {
-  report('default preset', 'left unchanged (--no-default)')
+/**
+ * The `agent-presets.default` user setting applies to EVERY profile of this
+ * harness home — it layers over a deployment's own composition default (the
+ * studio bundle, for instance, sets `default: studio`). Setting it therefore
+ * hijacks the default of every other profile, so it is opt-in and reported.
+ */
+if (removeDefault) {
+  if (!existsSync(settingsFile)) {
+    report('default preset', 'no settings file; nothing to remove')
+  } else {
+    const settings = readFileSync(settingsFile, 'utf8')
+    const block = /^agent-presets:\s*\n\s+default:\s*(\S+)\n/m.exec(settings)
+    if (block === null) report('default preset', 'no agent-presets default to remove')
+    else if (block[1] !== presetId) report('default preset', `left alone: it names ${block[1]}, not ${presetId}`)
+    else {
+      report('default preset', `removing "default: ${presetId}" from ${settingsFile}`)
+      if (!dryRun) writeFileSync(settingsFile, settings.replace(block[0], ''))
+    }
+  }
+} else if (!setDefault) {
+  report('default preset', `unchanged; pick "${presetId}" per session, or re-run with --set-default`)
 } else if (!existsSync(settingsFile)) {
-  report('default preset', `no ${settingsFile}; start a session on the "${presetId}" preset by hand`)
+  report('default preset', `no ${settingsFile}; pick "${presetId}" per session`)
 } else {
   const settings = readFileSync(settingsFile, 'utf8')
   if (/^agent-presets:/m.test(settings)) {
     const current = /^agent-presets:\s*\n(\s+default:\s*(\S+))/m.exec(settings)
     report('default preset', current === null
       ? 'an agent-presets section exists without a default; set `agent-presets: { default: ' + presetId + ' }` by hand'
-      : `already set to ${current[2]}`)
+      : `already set to ${current[2]} (applies to EVERY profile here)`)
   } else {
-    report('default preset', `${presetId} (prepended to ${settingsFile})`)
+    report('default preset', `${presetId} — this applies to EVERY profile of this harness home and overrides a profile's own default`)
     if (!dryRun) writeFileSync(settingsFile, `agent-presets:\n  default: ${presetId}\n${settings}`)
   }
 }
 
-console.log(`\n${dryRun ? 'Dry run complete.' : 'Installed.'} Next: restart the harness; new sessions are then composed with the guard, and the log shows "dsh-cache-guard: engine guarded (mode manual)".`)
+console.log(`\n${dryRun ? 'Dry run complete.' : 'Installed.'} The guarded preset is available to every profile of this harness home; the engine half is self-contained, so the installed copy serves them all. A session picks it at start — by the preset chip in the GUI, or as the machine-wide default with --set-default. The log then shows "dsh-cache-guard: engine guarded (mode manual)".`)

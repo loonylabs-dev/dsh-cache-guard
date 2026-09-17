@@ -23,6 +23,7 @@
 - [How It Intercepts](#how-it-intercepts)
 - [Guarantees](#guarantees)
 - [Installation](#installation)
+- [Profiles](#profiles)
 - [Configuration](#configuration)
 - [Verification & Testing](#verification--testing)
 - [Known Limitations](#known-limitations)
@@ -113,7 +114,7 @@ Nothing is imported from the compaction packages and no engine code is changed: 
 dsh plugin --profile web add file:C:/path/to/plugins/dsh-cache-guard
 ```
 
-The engine half must be mounted **inside the preset's `compaction` group** — that group isolates the `compaction` and `toolResultPruner` services, so a row outside it cannot see the engine it has to wrap. The installer writes a preset that **includes the shipped composition and patches that one row in**, and makes it the default for new sessions:
+The engine half must be mounted **inside the preset's `compaction` group** — that group isolates the `compaction` and `toolResultPruner` services, so a row outside it cannot see the engine it has to wrap. The installer writes a preset that **includes the shipped composition and patches that one row in**:
 
 ```bash
 node tools/install-profile.mjs --profile web --preset cache-guard
@@ -136,15 +137,17 @@ node tools/install-profile.mjs --profile web --preset cache-guard
 
 `cordis:include` applies `patches` to the entries it reads, and an `insert` patch carrying an `id` pushes its rows into that group's child list. The preset is therefore **the shipped composition plus one row**, not a copy: a harness update to the shipped preset applies here too. The same file shape works for `code`, `cordis`, or a preset of your own — change `--source`.
 
-The default comes from the `agent-presets` settings namespace (`--no-default` leaves it alone):
+A preset is chosen when a session starts, so a running session keeps the composition it began with: restart the harness and start a **new session**, picking `cache-guard` in the preset chip. The log then shows `dsh-cache-guard: engine guarded (mode manual)`, and the pill's menu shows the live context line.
 
-```yaml
-# ~/.dsh/settings.yaml
-agent-presets:
-  default: cache-guard
-```
+## Profiles
 
-A preset is chosen when a session starts, so a running session keeps the composition it began with: restart the harness and start a **new session**. The log then shows `dsh-cache-guard: engine guarded (mode manual)`, and the pill's menu shows the live context line. Reverting is deleting those two lines, or picking another preset for the next session.
+The preset roots and the settings document belong to the **harness home**, not to one profile, so:
+
+- The guarded preset is available to **every profile** on that machine, including custom ones.
+- The engine half is self-contained (it resolves every dependency from its own directory), so **one installed copy serves every profile** — the preset row can point at any profile's `node_modules`, and the others still load it.
+- The **pill and its mode menu need the host half in that profile**: run the installer once per profile that should have the UI (`--profile studio`, …). Without it the guard still asks and still declines, but nothing on screen can switch modes.
+- `--set-default` writes the machine-wide `agent-presets.default`. That value layers over a **profile's own composition default** — a deployment whose bundle sets `default: studio` would start new sessions on the guarded preset too — so it is opt-in, and `--remove-default` takes it back.
+- A profile **without a question provider** (headless, automation) has nothing to ask: in `manual` mode the guard then declines every automatic rewrite, and the session eventually hits its window. Give such a profile's preset row `mode: auto` (the installer's `--mode auto`) or keep it on an unguarded preset.
 
 For plugin development, install it as a link so edits apply without reinstalling (`file:` entries are copies that pnpm does not refresh):
 
@@ -180,7 +183,8 @@ dsh web --dump-config | Select-String cache-guard
 - **The per-session mode is process-local.** "Allow automatically for this session" lasts until the harness restarts; a durable record would need a session event type this build knows, which an out-of-repo plugin cannot add.
 - **A declined overflow still ends the turn.** At a provider-confirmed context overflow the window is already exhausted, so declining preserves the original provider error.
 - **The plan mirrors the engine's resolution.** Threshold and retention are recomputed from the public engine config with the documented formulas (`resolveTargetPolicy`, `resolveCompactSpec`), and the routed provider/model come from the durable `request/header` the engine itself reads. A change upstream must be followed here.
-- **A session composed without the engine half is not guarded.** The veto lives in the agent preset, so a session started on a preset that lacks the row (the shipped `standard`, for instance) compacts exactly as before. That is why the installer makes the guarded preset the default; sessions that started earlier keep their composition either way.
+- **A session composed without the engine half is not guarded.** The veto lives in the agent preset, so a session started on a preset that lacks the row (the shipped `standard`, for instance) compacts exactly as before. Pick the guarded preset per session, or set the machine-wide default knowing it applies to every profile of that harness home.
+- **A profile with no question provider blocks rather than spends.** With `mode: manual` and nothing to ask, the guard declines and logs it; the session then runs to its window limit. Use `mode: auto` for a headless profile's row.
 - **Everything but the harness vocabulary is English.** Code, comments, docs, dialog copy, and the pill are English; only the harness terms the guard reports (`compaction/prune`, `thresholdRatio`, `retainRatio`) keep their upstream spelling.
 
 ## 🤝 Contributing
