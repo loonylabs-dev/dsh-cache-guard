@@ -106,6 +106,14 @@ The guard therefore:
 
 Nothing is imported from the compaction packages and no engine code is changed: the guard reads the engine's public config and the public services of its context, and restores the original method when it unloads.
 
+### Pruning never lands alone
+
+The engine tries the model-free pass first: it abbreviates every oversized tool result, then summarizes only if the surface is still above the threshold. A pass that stops there has a bad price. Pruning rewrites in place, so the surface stays almost as large (measured: 839k → 737k) and the next request pays the cache break at nearly full size — 724k tokens re-read cold, for a pass that freed 93k and needed only 186.
+
+A summarization in the same operation pays that break once, replaces the older span with a checkpoint, leaves a much smaller surface, and even shrinks the summarizer's input by the abbreviation the pruning already did. So the guard **declines any plan whose pruning alone would get below the threshold**, silently: nothing happens, the surface keeps growing, and the guard asks once the pressure has risen far enough that a summarization follows in the same operation. Only then is the decision worth making, and only then does an accepted change pay the cache break once.
+
+The consequence is deliberate: a session can run close to its window before the guard asks, and a provider-confirmed overflow then forces the combined operation instead. Pair it with the threshold you want (see [Configuration](#configuration)) — the guard prices both phases either way.
+
 ## Guarantees
 
 - **A guard bug never blocks the engine.** If pricing throws, the original call runs and the failure is logged.
@@ -170,6 +178,12 @@ Both halves read the same keys; the preset row wins over the host row.
 | `mode` | `manual` | `manual` asks before an automatic surface change; `auto` only reports it |
 | `pricePerMTokens` | unset | full-price input rate per million tokens; adds a currency amount to the dialog and the pill |
 | `estimatedSummaryTokens` | `4000` | assumed checkpoint size used when pricing a planned summarization |
+
+The **trigger threshold** belongs to the engine, not to the guard: it is the `compaction-basic` row's `thresholdRatio` (default `0.8`, i.e. compact once 80% of the routed window is in use). The installer can set it — it patches that row's config in the generated preset, which is the whole of that row's config because a patch replaces rather than merges:
+
+```bash
+node tools/install-profile.mjs --threshold 0.9
+```
 
 ## Verification & Testing
 

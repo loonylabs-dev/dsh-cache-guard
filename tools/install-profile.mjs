@@ -4,6 +4,7 @@
  *
  *   node tools/install-profile.mjs [--profile web] [--preset cache-guard]
  *                                  [--source standard] [--app <presets dir>]
+ *                                  [--mode manual] [--threshold 0.9]
  *                                  [--set-default | --remove-default] [--dry-run]
  *
  * The written preset is an INCLUDE of the shipped composition plus one patch that
@@ -87,27 +88,39 @@ if (root === undefined) {
 const baseComposition = pathToFileURL(join(root, sourceId, 'agent.cordis.yml')).href
 const engineSpecifier = pathToFileURL(installedEngine).href
 
+/** The engine's trigger share, when the command line asks for one. */
+const thresholdRatio = Number.parseFloat(flag('threshold', ''))
+if (flag('threshold', undefined) !== undefined
+  && (!Number.isFinite(thresholdRatio) || thresholdRatio <= 0 || thresholdRatio > 1)) {
+  console.error(`--threshold must be a share of the context window in (0, 1], got "${flag('threshold', '')}"`)
+  process.exit(1)
+}
+
 /** The guarded preset: the shipped composition plus one row inside its compaction group. */
 function presetText() {
   return guardedPresetText({
     baseFileUrl: baseComposition,
     engineSpecifier,
     mode: flag('mode', 'manual'),
+    ...Number.isFinite(thresholdRatio) ? { thresholdRatio } : {},
   })
 }
 
 const existing = existsSync(presetFile) ? readFileSync(presetFile, 'utf8') : ''
-const includeBased = existing.includes('cordis:include')
-const legacyCopy = !includeBased && existing.includes('- id: compaction')
-if (includeBased) {
-  report('preset', `already an include-based preset: ${presetFile}`)
+const desired = presetText()
+if (existing === desired) {
+  report('preset', `already current: ${presetFile}`)
 } else {
-  if (legacyCopy) report('preset', 'replacing a full preset copy with an include-based one')
-  else report('preset', `${join(root, sourceId)} + engine row -> ${presetFile}`)
+  // The file is generated, so a differing one is out of date rather than
+  // hand-made: rebuilding it is how `--mode` and `--threshold` take effect.
+  const legacyCopy = !existing.includes('cordis:include') && existing.includes('- id: compaction')
+  if (existing === '') report('preset', `${join(root, sourceId)} + engine row -> ${presetFile}`)
+  else if (legacyCopy) report('preset', 'replacing a full preset copy with an include-based one')
+  else report('preset', `regenerating ${presetFile}`)
   if (!dryRun) {
     mkdirSync(presetDir, { recursive: true })
     if (legacyCopy) copyFileSync(presetFile, `${presetFile}.copy-backup`)
-    writeFileSync(presetFile, presetText())
+    writeFileSync(presetFile, desired)
   }
 }
 

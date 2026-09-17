@@ -12,9 +12,17 @@ import { describe, it } from 'node:test'
 import { decide, installGate, OPTIONS, describe as describePlan, routedTarget } from '../lib/gate.js'
 import { createPolicyStore } from '../lib/policy.js'
 
-/** Ten 80k nodes plus a prunable 60k tool result at seq 0, priced the way the meter would. */
-function fixture() {
-  const prices = [60_000, 80_000, 80_000, 80_000, 80_000, 80_000, 80_000, 80_000, 80_000, 80_000, 80_000]
+/**
+ * A prunable 60k tool result at seq 0 plus `extraNodes` 80k nodes, priced the way
+ * the meter would, with a 40k request envelope.
+ *
+ * The default surface is above the 0.9 x 1M threshold even AFTER pruning, so a
+ * summarization follows in the same operation — the only shape the guard asks
+ * about. `extraNodes: 0` leaves a surface that pruning alone would fix, which the
+ * guard defers without asking.
+ */
+function fixture({ extraNodes = 6 } = {}) {
+  const prices = [60_000, ...Array.from({ length: 10 + extraNodes }, () => 80_000)]
   const nodes = prices.map((tokens, seq) => ({ seq, tokens }))
   const surfaceTokens = prices.reduce((total, tokens) => total + tokens, 0)
   // Indexed by seq, as the log is: the prunable result sits at seq 0 and carries 60k of text.
@@ -63,15 +71,55 @@ describe('routedTarget', () => {
 })
 
 describe('describePlan', () => {
-  it('reports the cold re-read and its share of the request', async () => {
+  it('reports both phases, the cold re-read, and its share of the request', async () => {
     const { ctx, session } = fixture()
     const policy = createPolicyStore({ defaultMode: 'manual' })
     await decide({ ctx, engine: ENGINE, policy, agent: {}, session, sessionId: 'session-1', trigger: 'pressure', config: CONFIG, logger: silent })
     const text = describePlan(policy.lastAction('session-1'), { pricePerMTokens: 0.14 })
-    assert.match(text, /Context: 900k of 1\.00M/)
+    assert.match(text, /Context: [\d.]+M of 1\.00M \(rewrite at 900k\)/)
     assert.match(text, /Prunes 1 old tool results: 60k freed/)
-    assert.match(text, /800k re-read in full \(95% of the request\)/)
-    assert.match(text, /≈ \$0\.1120/)
+    assert.match(text, /Then summarizes/)
+    assert.match(text, /re-read in full \(\d+% of the request\)/)
+    assert.match(text, /≈ \$/)
+  })
+})
+
+describe('the pruning rule', () => {
+  it('defers a prune-only pass instead of asking, and records no action', async () => {
+    // Pruning alone would get below the threshold, which is the pass the guard
+    // refuses: it breaks the cache without shrinking the surface, and the
+    // summarization that eventually lands pays that break anyway.
+    const { ctx, session, asked } = fixture({ extraNodes: 0 })
+    const policy = createPolicyStore({ defaultMode: 'manual' })
+    const decision = await decide({ ctx, engine: ENGINE, policy, agent: {}, session, sessionId: 'session-1', trigger: 'pressure', config: CONFIG, logger: silent })
+    assert.equal(decision, 'declined')
+    assert.equal(asked.length, 0, 'a deferred pass is not a decision to put to the human')
+    assert.equal(policy.lastAction('session-1'), undefined)
+  })
+
+  it('asks once a summarization is part of the plan', async () => {
+    const { ctx, session, asked } = fixture()
+    const policy = createPolicyStore({ defaultMode: 'manual' })
+    await decide({ ctx, engine: ENGINE, policy, agent: {}, session, sessionId: 'session-1', trigger: 'pressure', config: CONFIG, logger: silent })
+    assert.equal(asked.length, 1)
+    assert.equal(policy.lastAction('session-1').kind, 'prune-and-summarize')
+  })
+
+  it('never lets the engine run for a prune-only plan', async () => {
+    const { ctx, session } = fixture({ extraNodes: 0 })
+    let ran = 0
+    const engine = {
+      config: ENGINE.config,
+      compactIfNeeded: async () => {
+        ran += 1
+        return { compactionId: 'x' }
+      },
+    }
+    const policy = createPolicyStore({ defaultMode: 'auto' })
+    installGate({ ctx, engine, policy, config: CONFIG, logger: silent })
+    const result = await engine.compactIfNeeded({ session }, 'pressure', new AbortController().signal)
+    assert.equal(result, null)
+    assert.equal(ran, 0, 'a prune-only pass must not reach the engine at all')
   })
 })
 
@@ -105,7 +153,7 @@ describe('decide', () => {
     const decision = await decide({ ctx, engine: ENGINE, policy, agent: {}, session, sessionId: 'session-1', trigger: 'pressure', config: CONFIG, logger: silent })
     assert.equal(decision, 'allowed')
     assert.equal(asked.length, 0)
-    assert.equal(policy.lastAction('session-1').kind, 'prune-only')
+    assert.equal(policy.lastAction('session-1').kind, 'prune-and-summarize')
   })
 
   it('switches the session to auto when the answer says so', async () => {

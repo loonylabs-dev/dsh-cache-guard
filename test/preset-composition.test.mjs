@@ -82,6 +82,7 @@ describe('generated preset composition', () => {
       baseFileUrl: pathToFileURL(baseFile).href,
       engineSpecifier: 'file:///guard/engine.js',
       mode: 'manual',
+      thresholdRatio: 0.9,
     }))
 
     // The guard's own module is not in the table; the Loader imports file URLs itself.
@@ -107,6 +108,10 @@ describe('generated preset composition', () => {
       assert.ok(group.options.config.some(child => child.id === 'cache-guard'),
         'the guard must be a child of the compaction group, not a sibling of it')
       assert.equal(group.options.isolate?.compaction, true, 'the shipped isolation must be preserved')
+
+      // The engine's own trigger is patched on ITS row, not on ours.
+      const engine = entries.find(entry => entry.options.id === 'compaction-basic')
+      assert.deepEqual(engine.options.config, { thresholdRatio: 0.9 })
     } finally {
       await ctx.fiber.dispose()
       await rm(root, { recursive: true, force: true })
