@@ -64,16 +64,22 @@ An automatic context rewrite is ready. Allow it?
 And a chip in the composer's tool row — inside the input card, right after the access-mode chip, built with the same geometry as its siblings (28px pill, design-system glyph, chevron that rotates while open). It carries the mode only; clicking it opens a small menu with the numbers. The glyph follows the mode — a question mark while the guard asks, a check while it runs unprompted — and the label collapses to glyph + chevron in a narrow composer, exactly as the neighbouring chips do.
 
 ```
-[ (?) Cache: ask ⌄ ]    ╭───────────────────────────────────────────╮
-                        │ Context 837k of 1.05M · rewrite at 839k   │
-                        │ last rewrite: 28 tool results pruned ·    │
-                        │ 724k re-read in full (declined, nothing   │
-                        │ changed)                                  │
-                        │ ───────────────────────────────────────── │
-                        │ ● Ask before every rewrite                │
-                        │ ○ Allow automatically                     │
-                        ╰───────────────────────────────────────────╯
+[ (?) Cache: ask ⌄ ]    ╭────────────────────────────────────────────╮
+                        │ Context 837k of 1.05M · rewrite at 839k    │
+                        │ last rewrite: 28 tool results pruned ·     │
+                        │ 724k re-read in full (declined, nothing    │
+                        │ changed)                                   │
+                        │ ────────────────────────────────────────── │
+                        │ (?) Ask before every rewrite           ✓   │
+                        │     Pruning and summarizing wait for your  │
+                        │     approval.                              │
+                        │ (✓) Allow automatically                    │
+                        │     Runs without asking; its cost shows up │
+                        │     here afterwards.                       │
+                        ╰────────────────────────────────────────────╯
 ```
+
+Its menu rows follow the harness `Menu`: a leading 16px glyph, the label with its hint, and a trailing check for the selected row — the selection is a check, never a colour fill, exactly as in the neighbouring menus.
 
 The long sentence also sits in the chip's tooltip, so hovering shows it without opening the menu. The host keeps the chosen mode per session.
 

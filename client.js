@@ -35,11 +35,15 @@ window.__ModuleLoader__.load({
     /** `ic_ds_check_outline_14`: the guard runs unprompted. */
     const CHECK_PATH = 'M11.5635 4.58984L7.61426 9.07715C7.35154 9.37561 7.11346 9.64812 6.89453 9.84668C6.66593 10.054 6.38519 10.2506 6.01465 10.3164C5.82079 10.3508 5.62207 10.3529 5.42773 10.3213C5.0561 10.2609 4.77266 10.0674 4.54102 9.86328C4.31926 9.66791 4.07752 9.39911 3.81055 9.10449L2.44531 7.59863L3.55664 6.59082L4.92188 8.09766C5.21256 8.41844 5.38878 8.61191 5.53223 8.73828C5.61022 8.80699 5.65253 8.83192 5.66895 8.83984C5.69648 8.84429 5.72449 8.84467 5.75195 8.83984C5.72657 8.84451 5.75564 8.85422 5.88672 8.73535C6.02833 8.60692 6.20225 8.41088 6.48828 8.08594L10.4385 3.59961L11.5635 4.58984Z'
 
-    /** One 14px design-system glyph. */
-    function glyph(paths) {
+    /**
+     * One design-system glyph.
+     * @param paths - SVG path data.
+     * @param size - pixel size; the trigger renders 14px, menu rows keep the native 16px.
+     */
+    function glyph(paths, size = 14) {
       return React.createElement('svg', {
-        width: 14,
-        height: 14,
+        width: size,
+        height: size,
         viewBox: '0 0 14 14',
         fill: 'none',
         xmlns: 'http://www.w3.org/2000/svg',
@@ -65,12 +69,18 @@ window.__ModuleLoader__.load({
       '.cg-info { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18ch; }',
       '.cg-readout { padding: 6px 9px 2px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); white-space: normal; }',
       '.cg-readout.dim { padding-top: 0; padding-bottom: 6px; color: var(--dsw-alias-label-tertiary); border-bottom: 1px solid var(--dsw-alias-border-l2); margin-bottom: 4px; }',
-      '.cg-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: 250px; padding: 4px; border: 1px solid var(--dsw-alias-border-inverted); border-radius: 12px; box-shadow: var(--dsw-shadow-lv3); background: var(--dsw-specific-menu); color: var(--dsw-alias-label-primary); }',
-      '.cg-item { display: flex; flex-direction: column; gap: 2px; width: 100%; box-sizing: border-box; padding: 7px 9px; border: none; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; text-align: left; cursor: pointer; }',
+      '.cg-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: 264px; padding: 4px; border: 1px solid var(--dsw-alias-border-inverted); border-radius: 12px; box-shadow: var(--dsw-shadow-lv3); background: var(--dsw-specific-menu); color: var(--dsw-alias-label-primary); }',
+      // Rows follow the harness Menu: 8px gap between leading glyph, label, and a
+      // trailing check for the selection — the selection is never a color fill.
+      '.cg-item { display: flex; align-items: flex-start; gap: 8px; width: 100%; box-sizing: border-box; padding: 8px 10px; border: none; border-radius: 10px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 20px; text-align: left; cursor: pointer; }',
       '.cg-item:hover { background: var(--dsw-alias-interactive-bg-hover); }',
-      '.cg-item.active .cg-item-label { color: var(--dsw-alias-state-business-primary); }',
-      '.cg-item-label { font-size: 13px; font-weight: 500; line-height: 20px; }',
-      '.cg-item-hint { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }',
+      '.cg-item-icon { display: inline-flex; flex: 0 0 auto; padding-top: 2px; color: var(--dsw-alias-label-tertiary); }',
+      '.cg-item-icon svg { width: 16px; height: 16px; }',
+      '.cg-item-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }',
+      '.cg-item-label { font-weight: 500; }',
+      '.cg-item-hint { font-size: 12px; line-height: 16px; color: var(--dsw-alias-label-tertiary); white-space: normal; }',
+      '.cg-item-check { display: inline-flex; flex: 0 0 auto; margin-left: auto; padding-top: 2px; color: var(--dsw-alias-label-primary); }',
+      '.cg-item-check svg { width: 16px; height: 16px; }',
     ].join('\n')
 
     /** Inject the sheet once; the browser half owns its own styling. */
@@ -210,17 +220,28 @@ window.__ModuleLoader__.load({
         }, glyph([CHEVRON_PATH]))),
       ]
       if (open) {
-        children.unshift(React.createElement('div', { key: 'menu', className: 'cg-menu' },
+        children.unshift(React.createElement('div', { key: 'menu', className: 'cg-menu', role: 'menu' },
           pressure === '' ? null : React.createElement('div', { className: 'cg-readout' }, pressure),
           React.createElement('div', { className: 'cg-readout dim' }, action),
-          MODE_OPTIONS.map(option => React.createElement('button', {
-            key: option.mode,
-            type: 'button',
-            className: mode === option.mode ? 'cg-item active' : 'cg-item',
-            onClick: () => { setOpen(false); face.setMode(option.mode) },
-          },
-          React.createElement('span', { className: 'cg-item-label' }, option.label),
-          React.createElement('span', { className: 'cg-item-hint' }, option.hint)))))
+          MODE_OPTIONS.map(option => {
+            const selected = mode === option.mode
+            return React.createElement('button', {
+              key: option.mode,
+              type: 'button',
+              role: 'menuitem',
+              className: 'cg-item',
+              'aria-checked': selected,
+              onClick: () => { setOpen(false); face.setMode(option.mode) },
+            },
+            React.createElement('span', { className: 'cg-item-icon', 'aria-hidden': true },
+              glyph(option.mode === 'auto' ? [CHECK_PATH] : QUESTION_PATHS, 16)),
+            React.createElement('span', { className: 'cg-item-text' },
+              React.createElement('span', { className: 'cg-item-label' }, option.label),
+              React.createElement('span', { className: 'cg-item-hint' }, option.hint)),
+            selected
+              ? React.createElement('span', { className: 'cg-item-check', 'aria-hidden': true }, glyph([CHECK_PATH], 16))
+              : null)
+          })))
       }
       return React.createElement('div', { className: 'cg-wrap' }, children)
     }
