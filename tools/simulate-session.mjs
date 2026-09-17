@@ -19,8 +19,9 @@ import { Context } from '@deepseek-ai/cordis'
 import { decodeStorageRecord, Session, SessionId } from '@deepseek-ai/dsh-session'
 import ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
+import { pricePlan, formatTokens, splitMeasurement } from '../lib/cold-cost.js'
 import { planChange } from '../lib/plan.js'
-import { describe as describePlan, planInputs, routedTarget } from '../lib/gate.js'
+import { describe as describePlan, planInputs, routedTarget, sessionEnvelopeTokens } from '../lib/gate.js'
 
 const ROOT = join(process.env.USERPROFILE ?? '', '.dsh', 'sessions')
 const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
@@ -141,3 +142,31 @@ console.log(`  predicted warm             ${plan.estimate.warmTokens} tokens`)
 console.log(`  predicted cold             ${plan.estimate.coldTokens} tokens`)
 console.log(`  actual cached after        ${afterRewrite.data.usage.cacheReadTokens ?? 0} tokens`)
 console.log(`  actual full price after    ${afterRewrite.data.usage.inputTokens ?? 0} tokens`)
+
+// The same need, met from the NEWEST end: free only as much as the threshold
+// requires, starting at the tail, so the cache breaks as late as possible. The
+// cache cost of a rewrite is its POSITION, not its size.
+const needed = Math.max(0, measurement.totalTokens - plan.thresholdTokens)
+const fromNewest = []
+let freed = 0
+for (let index = plan.pruned.length - 1; index >= 0 && freed < needed; index -= 1) {
+  const entry = plan.pruned[index]
+  fromNewest.push({ seq: entry.seq, tokens: entry.after })
+  freed += entry.before - entry.after
+}
+const split = splitMeasurement(measurement)
+if (fromNewest.length > 0 && freed >= needed) {
+  const alternative = pricePlan(split.nodes, sessionEnvelopeTokens(session), {
+    rewrites: fromNewest,
+    totalBeforeTokens: measurement.totalTokens,
+  })
+  console.log(`\n--- the same need, pruned from the newest end ---`)
+  console.log(`  needed                     ${needed} tokens to reach the threshold`)
+  console.log(`  rewrites                   ${fromNewest.length} of ${plan.pruned.length}`)
+  console.log(`  predicted first change     position ${alternative.firstChangedPosition} of ${split.nodes.length}`)
+  console.log(`  predicted cold             ${alternative.coldTokens} tokens`
+    + ` (${formatTokens(alternative.coldTokens)} instead of ${formatTokens(plan.estimate.coldTokens)})`)
+} else {
+  console.log(`\n--- newest-end pruning ---`)
+  console.log(`  would not reach the threshold on its own (${freed} of ${needed} tokens from ${fromNewest.length} results)`)
+}

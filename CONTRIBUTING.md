@@ -37,10 +37,24 @@ Five rules govern changes to this repository:
 ## Testing
 
 ```sh
+npm install               # the harness packages the integration lane imports
 npm run test:unit         # no harness packages needed; fakes only
-npm run test:integration  # real engine, real meter, real Loader (needs devDependencies)
+npm run test:integration  # real engine, real meter, real Loader
 npm test                  # both
 ```
+
+The integration lane imports harness packages, which resolve from this package's
+`node_modules`. CI installs them from the registry through `devDependencies`. On a
+development machine that already runs a harness, a junction to that installation
+serves the same purpose without a download (and is what `plugins/dsh-pathfix`
+does too):
+
+```powershell
+New-Item -ItemType Junction -Path node_modules `
+  -Target "$env:APPDATA\npm\node_modules\@deepseek-ai\dsh\node_modules"
+```
+
+It is gitignored, and an `npm` command run in this directory can prune it.
 
 The integration lane is the one that matters for a claim like "the dialog is reachable": it mounts the shipped compaction engine, meter, and pruner in one context and drives them through the engine's own `agent/pre-step` path. Keep that bar for any change to the interception.
 
