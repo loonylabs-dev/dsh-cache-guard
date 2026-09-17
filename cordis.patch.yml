@@ -1,0 +1,9 @@
+# dsh-cache-guard bundle patch
+#
+# Inserts the host half of dsh-cache-guard: the per-session policy state and the
+# surface the web client reads. The engine half is mounted per agent preset with
+# `role: engine`, because an agent's compaction engine lives in the preset realm.
+
+- insert:
+  - id: cache-guard
+    name: 'dsh-cache-guard'
