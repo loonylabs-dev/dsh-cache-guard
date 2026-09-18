@@ -73,21 +73,21 @@ function fixture({ extraNodes = 6 } = {}) {
       return { compactionId: 'compact-1' }
     },
   }
+  const meter = {
+    measure: () => ({ nodes, surfaceTokens, totalTokens: surfaceTokens + 40_000 }),
+    estimateMessage: message => message.content[0].content.map(block => block.text ?? '').join('').length,
+  }
   const ctx = {
     get: service => {
       if (service === 'userQuestions') return provider
       if (service === 'toolResultPruner') return pruner
       if (service === 'compaction') return compaction
+      if (service === 'tokenMeter') return meter
       return undefined
     },
-    compaction: undefined,
-    tokenMeter: {
-      measure: () => ({ nodes, surfaceTokens, totalTokens: surfaceTokens + 40_000 }),
-      estimateMessage: message => message.content[0].content.map(block => block.text ?? '').join('').length,
-    },
+    tokenMeter: meter,
   }
-  ctx.compaction = compaction
-  return { session, ctx, provider, asked, nodes, compactionCalls, pruneCalls, callSeq, resultSeq }
+  return { session, ctx, provider, asked, nodes, compactionCalls, pruneCalls, callSeq, resultSeq, meter }
 }
 
 const ENGINE = { config: { thresholdRatio: 0.9, retainRatio: 0.2, modelPolicies: [] } }
@@ -162,10 +162,16 @@ describe('the pruning rule', () => {
   it('compacts BEFORE it prunes, so one cache break covers both', async () => {
     const { ctx, session } = fixture()
     const order = []
-    ctx.compaction.compactRegion = async () => { order.push('compact'); return { compactionId: 'c' } }
-    ctx.get = service => service === 'toolResultPruner'
-      ? { pruneContent: () => null, pruneSession: () => { order.push('prune'); return { pruned: [] } } }
-      : service === 'compaction' ? ctx.compaction : undefined
+    ctx.get = service => {
+      if (service === 'toolResultPruner') {
+        return { pruneContent: () => null, pruneSession: () => { order.push('prune'); return { pruned: [] } } }
+      }
+      if (service === 'compaction') {
+        return { compactRegion: async () => { order.push('compact'); return { compactionId: 'c' } } }
+      }
+      if (service === 'tokenMeter') return ctx.tokenMeter
+      return undefined
+    }
     const engine = { config: ENGINE.config, compactIfNeeded: async () => null }
     installGate({ ctx, engine, policy: createPolicyStore({ defaultMode: 'auto' }), config: CONFIG, logger: silent })
     await engine.compactIfNeeded({ session }, 'pressure', new AbortController().signal)
@@ -228,15 +234,16 @@ describe('decide', () => {
 
   it('fails closed when no question provider is registered', async () => {
     const { ctx, session } = fixture()
-    ctx.get = () => undefined
+    const inner = ctx.get
+    ctx.get = service => (service === 'userQuestions' ? undefined : inner(service))
     const policy = createPolicyStore({ defaultMode: 'manual' })
     const decision = await decide({ ctx, engine: ENGINE, policy, agent: {}, session, sessionId: 'session-1', trigger: 'pressure', config: CONFIG, logger: silent })
     assert.equal(decision, 'declined')
   })
 
   it('does nothing below the threshold, without asking', async () => {
-    const { ctx, session, asked } = fixture()
-    ctx.tokenMeter.measure = () => ({ nodes: [{ seq: 0, tokens: 1000 }], surfaceTokens: 1000, totalTokens: 41_000 })
+    const { ctx, session, asked, meter } = fixture()
+    meter.measure = () => ({ nodes: [{ seq: 0, tokens: 1000 }], surfaceTokens: 1000, totalTokens: 41_000 })
     const policy = createPolicyStore({ defaultMode: 'manual' })
     const decision = await decide({ ctx, engine: ENGINE, policy, agent: {}, session, sessionId: 'session-1', trigger: 'pressure', config: CONFIG, logger: silent })
     // `declined` is the wrapper's "do nothing" — the same answer as a human's no.
@@ -284,5 +291,92 @@ describe('installGate', () => {
     assert.equal(ran, 0, 'the engine\'s own two-phase path must not run at all')
     assert.equal(compactionCalls.length, 1)
     assert.equal(pruneCalls.length, 1)
+  })
+
+  it('leaves the operation to the engine in off mode', async () => {
+    const { ctx, session, asked, compactionCalls } = fixture()
+    let ran = 0
+    const engine = {
+      config: ENGINE.config,
+      compactIfNeeded: async () => {
+        ran += 1
+        return { compactionId: 'engine-own' }
+      },
+    }
+    installGate({
+      ctx,
+      engine,
+      policy: createPolicyStore({ defaultMode: 'off' }),
+      config: { ...CONFIG, mode: 'off' },
+      logger: silent,
+    })
+    const result = await engine.compactIfNeeded({ session }, 'pressure', new AbortController().signal)
+    assert.deepEqual(result, { compactionId: 'engine-own' }, 'off hands the decision back to the engine')
+    assert.equal(ran, 1)
+    assert.equal(asked.length, 0, 'off asks nobody')
+    assert.equal(compactionCalls.length, 0, 'off prices nothing')
+  })
+
+  it('hands a pricing failure back to the engine instead of blocking it', async () => {
+    // A guard bug may cost money; it may never strand a session by declining an
+    // operation it could not price.
+    const { session } = fixture()
+    let ran = 0
+    const engine = {
+      config: ENGINE.config,
+      compactIfNeeded: async () => {
+        ran += 1
+        return { compactionId: 'engine-own' }
+      },
+    }
+    const warnings = []
+    installGate({
+      ctx: { get: () => { throw new Error('no meter here') } },
+      engine,
+      policy: createPolicyStore({ defaultMode: 'manual' }),
+      config: CONFIG,
+      logger: { info: () => {}, warn: message => warnings.push(message) },
+    })
+    const result = await engine.compactIfNeeded({ session }, 'pressure', new AbortController().signal)
+    assert.deepEqual(result, { compactionId: 'engine-own' })
+    assert.equal(ran, 1)
+    assert.match(warnings[0], /pricing failed/)
+    assert.match(warnings[0], /the engine decides this one itself/)
+  })
+
+  it('wraps an engine once, whoever gets there first', async () => {
+    const { ctx, session, asked } = fixture()
+    const engine = { config: ENGINE.config, compactIfNeeded: async () => ({ compactionId: 'own' }) }
+    const policy = createPolicyStore({ defaultMode: 'manual' })
+    const messages = []
+    installGate({ ctx, engine, policy, config: CONFIG, logger: silent, owner: 'host plane' })
+    const wrapped = engine.compactIfNeeded
+    installGate({
+      ctx,
+      engine,
+      policy,
+      config: CONFIG,
+      logger: { info: message => messages.push(message), warn: () => {} },
+      owner: 'preset row',
+    })
+    assert.equal(engine.compactIfNeeded, wrapped, 'the second installer must leave the wrapper alone')
+    assert.match(messages[0], /already guarded by the host plane/)
+    assert.equal(policy.engines(), 1, 'and it must not count as a second guarded engine')
+    await engine.compactIfNeeded({ session }, 'pressure', new AbortController().signal)
+    assert.equal(asked.length, 1, 'one wrapper, one question')
+  })
+
+  it('reports how many engines it guards, and takes the count back on dispose', () => {
+    const { ctx } = fixture()
+    const policy = createPolicyStore({ defaultMode: 'manual' })
+    const first = { config: ENGINE.config, compactIfNeeded: async () => null }
+    const second = { config: ENGINE.config, compactIfNeeded: async () => null }
+    const disposeFirst = installGate({ ctx, engine: first, policy, config: CONFIG, logger: silent })
+    const disposeSecond = installGate({ ctx, engine: second, policy, config: CONFIG, logger: silent })
+    assert.equal(policy.engines(), 2)
+    disposeFirst()
+    assert.equal(policy.engines(), 1)
+    disposeSecond()
+    assert.equal(policy.engines(), 0)
   })
 })

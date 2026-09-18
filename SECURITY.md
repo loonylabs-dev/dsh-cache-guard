@@ -10,13 +10,14 @@ Please do not open a public issue for an exploitable security defect. There is n
 
 * **A rewrite that lands despite a decline.** Any path where the guard answers "not now" and the surface is still rewritten (or a summarization call still runs) — that is the plugin's whole promise.
 * **A forced silence that costs money.** Any path where the guard suppresses the engine's provider-overflow recovery without the human having decided, leaving a session to fail or to keep spending.
-* **Unauthorized mode changes.** `GET /cache-guard/state` and `POST /cache-guard/mode` are unauthenticated loopback routes: they change the guard's mode for a session id the caller supplies. Beyond that they read and write nothing. Report any way they reach beyond that, or any way a page can use them to make a session rewrite without a human seeing the dialog.
+* **Unauthorized mode changes.** `GET /cache-guard/state` and `POST /cache-guard/mode` are unauthenticated loopback routes: they change the guard's mode for a session id the caller supplies — including `off`, which disarms the guard for that session. Beyond that they read and write nothing. Report any way they reach beyond that, or any way a page can use them to make a session rewrite without a human seeing the dialog.
+* **A gate that reports itself armed while it is not.** The host half guards every preset realm's engine from the host plane and reports how many engines it holds; the pill's `Cache: ask` is derived from that number. Report any state where the pill claims protection while a rewrite can land unanswered — that is how the 2026-09-18 incident went unnoticed.
 * **Leaked content.** Any defect where the guard's log lines, the dialog, or the host endpoints expose more of a session than the numbers it prices (token counts, positions, model names).
 
 ## What is not a vulnerability here
 
 * **Compaction and pruning themselves.** The plugin does not implement either; it gates the harness's own. Whether a rewrite is safe for a given session is `dsh-compaction-basic`'s and `dsh-compaction-tool-result-pruner`'s contract.
-* **A session composed without the guard.** A preset that does not carry the engine row compacts exactly as the shipped harness does. That is a configuration, not a defect — see the README on where the two halves are active.
+* **A session with the guard switched off.** `off` is the documented opt-out: the engine compacts exactly as the shipped harness does. That is a configuration, not a defect — see the README on where the guard is active.
 * **Numbers that differ from your provider's bill.** The cold re-read is priced through the harness's own meter, and the checkpoint size is an estimate. A different figure on an invoice is expected; a *systematically* wrong split is worth reporting with the session log excerpt that shows it.
 * **An unanswered dialog.** The guard waits indefinitely by design: an unanswered question costs nothing, and the session simply does not continue until it is answered.
 

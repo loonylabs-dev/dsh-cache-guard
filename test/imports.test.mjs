@@ -37,10 +37,11 @@ describe('plugin halves', () => {
   it('publishes the policy store under the cacheGuard service key', async () => {
     const { apply } = await import('../index.js')
     let provided
+    const listeners = []
     const ctx = {
       provide: (key, value) => { provided = { key, value } },
       effect: callback => callback(),
-      on: () => {},
+      on: (name, listener, options) => { listeners.push({ name, options }); return () => {} },
       get: () => undefined,
       logger: undefined,
     }
@@ -51,6 +52,26 @@ describe('plugin halves', () => {
     assert.equal(provided.value.mode('session-1'), 'auto')
     provided.value.setMode('session-1', 'manual')
     assert.equal(provided.value.mode('session-1'), 'manual')
+    assert.equal(provided.value.engines(), 0, 'no engine has appeared yet')
+    // The host half has to hear every realm's engine, which only a global
+    // listener does: the event's scope filter drops everyone else.
+    const global = listeners.filter(entry => entry.name === 'internal/service' && entry.options?.global === true)
+    assert.equal(global.length, 1)
+  })
+
+  it('installs no gate at all when the mode is off', async () => {
+    const { apply } = await import('../index.js')
+    const listeners = []
+    const ctx = {
+      provide: () => {},
+      effect: callback => callback(),
+      on: (name, listener, options) => { listeners.push({ name, options }); return () => {} },
+      get: () => undefined,
+      logger: undefined,
+    }
+    apply(ctx, { mode: 'off' })
+    const global = listeners.filter(entry => entry.options?.global === true)
+    assert.deepEqual(global, [], 'off is the documented way out of the guard')
   })
 
   it('rejects an unknown mode loud', async () => {

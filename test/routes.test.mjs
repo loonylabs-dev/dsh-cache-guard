@@ -37,6 +37,7 @@ describe('statePayload', () => {
   it('reports the session mode, the default, and the last priced plan', () => {
     const store = createPolicyStore({ defaultMode: 'manual' })
     store.setMode('session-1', 'auto')
+    store.recordEngines(3)
     store.recordPressure('session-1', { totalTokens: 839_046, contextWindow: 1_048_576, thresholdTokens: 838_860 })
     store.recordAction('session-1', { kind: 'prune-only', outcome: 'declined', estimate: { coldTokens: 724_447 } })
     const payload = statePayload({ store, config: { mode: 'manual', pricePerMTokens: 0.14 }, sessionId: 'session-1' })
@@ -45,6 +46,7 @@ describe('statePayload', () => {
       mode: 'auto',
       defaultMode: 'manual',
       pricePerMTokens: 0.14,
+      engines: 3,
       pressure: { totalTokens: 839_046, contextWindow: 1_048_576, thresholdTokens: 838_860 },
       lastAction: { kind: 'prune-only', outcome: 'declined', estimate: { coldTokens: 724_447 } },
     })
@@ -57,6 +59,7 @@ describe('statePayload', () => {
     assert.equal(payload.pressure, null)
     assert.equal(payload.lastAction, null)
     assert.equal(payload.pricePerMTokens, null)
+    assert.equal(payload.engines, 0, 'no engine guarded yet: the client must be able to say so')
   })
 })
 
@@ -65,6 +68,8 @@ describe('applyMode', () => {
     const store = createPolicyStore({ defaultMode: 'manual' })
     assert.equal(applyMode({ store, sessionId: 's', mode: 'auto' }), 'auto')
     assert.equal(store.mode('s'), 'auto')
+    assert.equal(applyMode({ store, sessionId: 's', mode: 'off' }), 'off', 'off is the documented way out')
+    assert.equal(store.mode('s'), 'off')
     assert.throws(() => applyMode({ store, sessionId: 's', mode: 'sometimes' }), /unknown mode/)
   })
 })

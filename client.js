@@ -2,9 +2,10 @@
  * dsh-cache-guard — browser half.
  *
  * Adds one entry to the composer dock (the row the context meter lives in): a
- * small pill that shows which mode the guard is in and, when the last automatic
- * rewrite was priced, what it cost. Clicking it offers the two modes; the host
- * half keeps the choice for the session.
+ * small pill that shows which mode the guard is in, whether any compaction engine
+ * is guarded at all, and, when the last automatic rewrite was priced, what it
+ * cost. Clicking it offers the three modes; the host half keeps the choice for
+ * the session.
  *
  * Loaded through the client module table, which is why the wrapper below and the
  * `dsh.client` manifest in package.json are both required.
@@ -69,6 +70,7 @@ window.__ModuleLoader__.load({
       '.cg-info { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18ch; }',
       '.cg-readout { padding: 6px 9px 2px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); white-space: normal; }',
       '.cg-readout.dim { padding-top: 0; padding-bottom: 6px; color: var(--dsw-alias-label-tertiary); border-bottom: 1px solid var(--dsw-alias-border-l2); margin-bottom: 4px; }',
+      '.cg-readout.warn { padding-bottom: 4px; color: var(--dsw-alias-state-warn-primary); }',
       '.cg-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: 264px; padding: 4px; border: 1px solid var(--dsw-alias-border-inverted); border-radius: 12px; box-shadow: var(--dsw-shadow-lv3); background: var(--dsw-specific-menu); color: var(--dsw-alias-label-primary); }',
       // Rows follow the harness Menu: 8px gap between leading glyph, label, and a
       // trailing check for the selection — the selection is never a color fill.
@@ -118,6 +120,11 @@ window.__ModuleLoader__.load({
         mode: 'auto',
         label: 'Allow automatically',
         hint: 'Runs without asking; its cost shows up here afterwards.',
+      },
+      {
+        mode: 'off',
+        label: 'Guard off',
+        hint: 'The engine compacts as shipped: nothing is priced, asked, or blocked.',
       },
     ]
 
@@ -194,7 +201,26 @@ window.__ModuleLoader__.load({
       }, [face])
 
       const mode = state === null ? null : state.mode
-      const label = mode === 'auto' ? 'Cache: auto' : mode === null ? 'Cache: …' : 'Cache: ask'
+      /**
+       * Whether any compaction engine in this process is guarded. The host half
+       * reports it, so the pill can tell "waiting for your approval" apart from
+       * "no guard is mounted here and rewrites run anyway" — the state that broke
+       * a cache unnoticed.
+       */
+      const engines = state === null ? null : state.engines
+      const inert = engines === 0
+      const label = mode === 'off'
+        ? 'Cache: off'
+        : inert
+          ? 'Cache: not armed'
+          : mode === 'auto' ? 'Cache: auto' : mode === null ? 'Cache: …' : 'Cache: ask'
+      const reach = mode === 'off'
+        ? 'The guard is off for this session: the engine compacts as shipped.'
+        : inert
+          ? 'No guarded compaction engine in this process — automatic rewrites run without asking.'
+          : mode === 'auto'
+            ? 'Automatic context rewrites run without asking.'
+            : 'Every automatic context rewrite waits for your approval.'
       // `pressure`/`lastAction` are the current host payload; the `plan` fallback
       // keeps an older host half usable until the harness is restarted.
       const plan = state === null ? null : state.plan
@@ -208,17 +234,15 @@ window.__ModuleLoader__.load({
         React.createElement('button', {
           key: 'pill',
           type: 'button',
-          className: mode === 'auto' ? 'cg-pill auto' : 'cg-pill',
+          className: mode === 'auto' || inert ? 'cg-pill auto' : 'cg-pill',
           'aria-label': `${label} — ${action}`,
           'aria-expanded': open,
           'aria-haspopup': 'menu',
-          title: `${mode === 'auto'
-            ? 'Automatic context rewrites run without asking.'
-            : 'Every automatic context rewrite waits for your approval.'}\n${pressure}\n${action}`,
+          title: `${reach}\n${pressure}\n${action}`,
           onClick: () => setOpen(!open),
         },
         React.createElement('span', { key: 'icon', className: 'cg-icon', 'aria-hidden': true },
-          glyph(mode === 'auto' ? [CHECK_PATH] : QUESTION_PATHS)),
+          glyph(mode === 'auto' || inert ? [CHECK_PATH] : QUESTION_PATHS)),
         React.createElement('span', { key: 'label', className: 'cg-label' }, label),
         React.createElement('span', {
           key: 'chevron',
@@ -228,6 +252,9 @@ window.__ModuleLoader__.load({
       ]
       if (open) {
         children.unshift(React.createElement('div', { key: 'menu', className: 'cg-menu', role: 'menu' },
+          inert || mode === 'off'
+            ? React.createElement('div', { className: 'cg-readout warn' }, reach)
+            : null,
           pressure === '' ? null : React.createElement('div', { className: 'cg-readout' }, pressure),
           React.createElement('div', { className: 'cg-readout dim' }, action),
           MODE_OPTIONS.map(option => {
@@ -241,7 +268,7 @@ window.__ModuleLoader__.load({
               onClick: () => { setOpen(false); face.setMode(option.mode) },
             },
             React.createElement('span', { className: 'cg-item-icon', 'aria-hidden': true },
-              glyph(option.mode === 'auto' ? [CHECK_PATH] : QUESTION_PATHS, 16)),
+              glyph(option.mode === 'manual' ? QUESTION_PATHS : [CHECK_PATH], 16)),
             React.createElement('span', { className: 'cg-item-text' },
               React.createElement('span', { className: 'cg-item-label' }, option.label),
               React.createElement('span', { className: 'cg-item-hint' }, option.hint)),

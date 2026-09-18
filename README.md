@@ -62,7 +62,7 @@ An automatic context rewrite is ready. Allow it?
   [ Allow once ]  [ Not now ]  [ Always allow (this session) ]
 ```
 
-And a chip in the composer's tool row — inside the input card, right after the access-mode chip, built with the same geometry as its siblings (28px pill, design-system glyph, chevron that rotates while open). It carries the mode only; clicking it opens a small menu with the numbers. The glyph follows the mode — a question mark while the guard asks, a check while it runs unprompted — and the label collapses to glyph + chevron in a narrow composer, exactly as the neighbouring chips do.
+And a chip in the composer's tool row — inside the input card, right after the access-mode chip, built with the same geometry as its siblings (28px pill, design-system glyph, chevron that rotates while open). It carries the state; clicking it opens a small menu with the numbers. The label has four values: `Cache: ask`, `Cache: auto`, `Cache: off`, and `Cache: not armed` — the last one for a process where no compaction engine is being guarded, which is the state that let a rewrite break a cache unanswered. The glyph follows the mode — a question mark while the guard asks, a check while it runs unprompted or is off — and the label collapses to glyph + chevron in a narrow composer, exactly as the neighbouring chips do.
 
 ```
 [ (?) Cache: ask ⌄ ]    ╭────────────────────────────────────────────╮
@@ -77,6 +77,9 @@ And a chip in the composer's tool row — inside the input card, right after the
                         │ (✓) Allow automatically                    │
                         │     Runs without asking; its cost shows up │
                         │     here afterwards.                       │
+                        │ (✓) Guard off                              │
+                        │     The engine compacts as shipped:        │
+                        │     nothing is priced, asked, or blocked.  │
                         ╰────────────────────────────────────────────╯
 ```
 
@@ -86,18 +89,22 @@ The long sentence also sits in the chip's tooltip, so hovering shows it without 
 
 ## Where It Is Active
 
-Two halves with different reach:
+Installing the plugin is the whole opt-in: the host half guards **every** session, on every preset, with nothing to pick.
 
-| Half | Lives in | Reach |
+| Part | Lives in | Reach |
 |---|---|---|
-| host | the profile bundle | **every** session: the pill, its menu, and the mode endpoints |
-| engine | the agent preset, inside the `compaction` group | only sessions composed on the guarded preset: the veto, the dialog, and the live numbers |
+| host half | the profile bundle | **every** session: the gate on each preset realm's engine, the pill, its menu, and the mode endpoints |
+| engine half (optional) | an agent preset, inside the `compaction` group | that preset only — a fallback for a deployment whose profile cannot carry the host half |
 
-A session composed on a preset without the engine row — the shipped `standard`, for example — compacts and prunes exactly as before, and the pill has nothing to report there. That is why the installer makes the guarded preset the default: new sessions are guarded without picking anything, and the composition they run is still the shipped one. Sessions that started earlier keep the composition they began with.
+An agent's engine is created inside its preset: the shipped `compaction` group isolates `compaction` and `toolResultPruner`, so the profile's own layer cannot reach the instance. A plain `internal/service` listener does not hear the registration either — the event carries a scope filter that drops every listener outside the providing realm. The host half listens with `{ global: true }`, which bypasses exactly that filter, and wraps each engine the moment its realm announces it. That is the same seam the harness's own preset invariant uses to observe realm registrations.
+
+Because the gate is armed from the host plane, a session composed on the shipped `standard` preset — the case that produced the measurement in [What It Prevents](#what-it-prevents) — is guarded like any other. Opting out is explicit, in three sizes: the session mode `off` in the pill, `mode: off` as a profile's or preset's configuration default, and removing the bundle.
 
 ## How It Intercepts
 
-Both operations run through **one** method — `compactIfNeeded` on the live compaction engine. Pruning is the first phase inside that call, summarization the second, and the provider-overflow recovery path enters the same method. `compaction-basic` registers its listeners with `this` bound to the engine instance and calls `this.compactIfNeeded(...)` internally, so replacing the instance method intercepts both paths. Wrapping the `compaction` service would not.
+Both operations run through **one** method — `compactIfNeeded` on the live compaction engine. Pruning is the first phase inside that call, summarization the second, and the provider-overflow recovery path enters the same method. `compaction-basic` registers its listeners with `this` bound to the engine instance and calls `this.compactIfNeeded(...)` internally, so replacing that one instance method intercepts both paths. Wrapping the `compaction` service would not, and neither would a listener that only sees the host plane's services.
+
+The announced value is a traced read, so its `ctx` answers with the *reading* context. The gate therefore takes the instance behind it (cordis exposes it under the global-registry symbol `cordis.original`) and prices through that instance's own context, which resolves the realm's pruner and meter. Pricing through the host plane would plan no pruning at all and understate the cold re-read.
 
 The guard therefore:
 
@@ -117,11 +124,13 @@ The guard always plans both. The same session, priced with the span the guard wo
 
 ## Guarantees
 
-- **A guard bug never blocks the engine.** If pricing throws, the original call runs and the failure is logged.
+- **A guard bug never blocks the engine.** If pricing throws, the original call runs and the failure is logged. A guard that cannot price an operation must not decide it: treating its own failure as a decline would silently stop compaction in every session it guards.
+- **The pill never promises protection the host cannot back.** It reads how many engines the process actually guards; with none, it says `Cache: not armed` instead of "waiting for your approval".
 - **Fail closed on silence.** With the mode set to `manual` and no question provider registered, the automatic rewrite is declined and the log says how to allow it (`mode: auto`).
 - **No repeat nagging.** A decline mutes the guard for the rest of the current turn instead of asking at every step.
+- **One wrapper per engine, whoever gets there first.** The host half marks the wrapper function through a global-registry symbol, so a preset row arriving second recognizes the work and stays inert, even when the two halves are separate copies of this package.
 - **No new session event types.** The bundle adds no `SessionEventMap` member: an event type this build does not know would make the session log unreadable to the very build that wrote it. The client surface derives everything from existing events and the guard's own state.
-- **Zero runtime dependencies.** The package imports nothing outside itself, so it cannot bind to a second copy of a harness class.
+- **Zero runtime dependencies.** The package imports nothing outside itself, so it cannot bind to a second copy of a harness class. It reads two global-registry symbols (`cordis.original`) instead of importing cordis.
 
 ## Installation
 
@@ -129,7 +138,9 @@ The guard always plans both. The same session, priced with the span the guard wo
 dsh plugin --profile web add file:C:/path/to/plugins/dsh-cache-guard
 ```
 
-The engine half must be mounted **inside the preset's `compaction` group** — that group isolates the `compaction` and `toolResultPruner` services, so a row outside it cannot see the engine it has to wrap. The installer writes a preset that **includes the shipped composition and patches that one row in**:
+That is the whole installation: the bundle patch mounts the host half, and the host half guards every preset realm's engine. The log shows `dsh-cache-guard: guarded a compaction engine of a preset realm (1 in this process, mode manual)` as soon as a session's realm appears, and `dsh-cache-guard: host ready (default mode manual)` at startup.
+
+A preset row is only needed where the host half cannot be installed — a deployment that composes its profile without bundle patches. It must sit **inside the preset's `compaction` group**, because that group isolates the `compaction` and `toolResultPruner` services. The installer writes a preset that **includes the shipped composition and patches that one row in**:
 
 ```bash
 node tools/install-profile.mjs --profile web --preset cache-guard
@@ -152,17 +163,17 @@ node tools/install-profile.mjs --profile web --preset cache-guard
 
 `cordis:include` applies `patches` to the entries it reads, and an `insert` patch carrying an `id` pushes its rows into that group's child list. The preset is therefore **the shipped composition plus one row**, not a copy: a harness update to the shipped preset applies here too. The same file shape works for `code`, `cordis`, or a preset of your own — change `--source`.
 
-A preset is chosen when a session starts, so a running session keeps the composition it began with: restart the harness and start a **new session**, picking `cache-guard` in the preset chip. The log then shows `dsh-cache-guard: engine guarded (mode manual)`, and the pill's menu shows the live context line.
+A preset is chosen when a session starts, so a running session keeps the composition it began with — which is why the host half, not a preset row, is what makes the guard cover every session. When a row is used, its log line is `dsh-cache-guard: engine guarded (mode manual)`, and in a profile that also carries the host half the row reports `already guarded by the host plane`.
 
 ## Profiles
 
 The preset roots and the settings document belong to the **harness home**, not to one profile, so:
 
-- The guarded preset is available to **every profile** on that machine, including custom ones.
-- The engine half is self-contained (it resolves every dependency from its own directory), so **one installed copy serves every profile** — the preset row can point at any profile's `node_modules`, and the others still load it.
-- The **pill and its mode menu need the host half in that profile**: run the installer once per profile that should have the UI (`--profile studio`, …). Without it the guard still asks and still declines, but nothing on screen can switch modes.
-- `--set-default` writes the machine-wide `agent-presets.default`. That value layers over a **profile's own composition default** — a deployment whose bundle sets `default: studio` would start new sessions on the guarded preset too — so it is opt-in, and `--remove-default` takes it back.
-- A profile **without a question provider** (headless, automation) has nothing to ask: in `manual` mode the guard then declines every automatic rewrite, and the session eventually hits its window. Give such a profile's preset row `mode: auto` (the installer's `--mode auto`) or keep it on an unguarded preset.
+- The host half guards every session of the profile it is installed in — one install per profile, and that profile needs no preset.
+- A preset row, when used, is available to **every profile** on that machine: the engine half is self-contained (it resolves every dependency from its own directory), so one installed copy serves all of them.
+- The **pill and its mode menu need the host half in that profile**. Without it nothing on screen can switch modes — and without it, nothing guards anything either.
+- `--set-default` writes the machine-wide `agent-presets.default`. It is only meaningful for a row-based installation; with the host half installed, sessions are already guarded whatever preset they run, so leave the profile's own default alone.
+- A profile **without a question provider** (headless, automation) has nothing to ask: in `manual` mode the guard then declines every automatic rewrite, and the session eventually hits its window. Set `mode: auto` for such a profile's host row (`cordis.patch.yml`) or turn the guard `off` there.
 
 For plugin development, install it as a link so edits apply without reinstalling (`file:` entries are copies that pnpm does not refresh):
 
@@ -172,11 +183,11 @@ dsh plugin --profile web add link:C:/path/to/plugins/dsh-cache-guard
 
 ## Configuration
 
-Both halves read the same keys; the preset row wins over the host row.
+The host row governs. A preset row's config applies only where the host half is absent — an engine is wrapped once, by whoever gets there first, and the host plane always announces before a preset row applies.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mode` | `manual` | `manual` asks before an automatic surface change; `auto` only reports it |
+| `mode` | `manual` | `manual` asks before an automatic surface change; `auto` only reports it; `off` leaves the operation to the engine as shipped |
 | `pricePerMTokens` | unset | full-price input rate per million tokens; adds a currency amount to the dialog and the pill |
 | `estimatedSummaryTokens` | `4000` | assumed checkpoint size used when pricing a planned summarization |
 
@@ -204,7 +215,9 @@ dsh web --dump-config | Select-String cache-guard
 - **The per-session mode is process-local.** "Allow automatically for this session" lasts until the harness restarts; a durable record would need a session event type this build knows, which an out-of-repo plugin cannot add.
 - **A declined overflow still ends the turn.** At a provider-confirmed context overflow the window is already exhausted, so declining preserves the original provider error.
 - **The plan mirrors the engine's resolution.** The trigger ratio, the retention budget, the routed provider/model (from the durable `request/header` the engine itself reads), and the safe-cut rule are recomputed here from the public engine config and the session surface — because the guard selects the range it replaces. A change upstream must be followed here; a range the engine rejects leaves the surface untouched and logs the failure.
-- **A session composed without the engine half is not guarded.** The veto lives in the agent preset, so a session started on a preset that lacks the row (the shipped `standard`, for instance) compacts exactly as before. Pick the guarded preset per session, or set the machine-wide default knowing it applies to every profile of that harness home.
+- **A profile without the host half is not guarded at all.** The gate is installed by the bundle's host row; a profile that composes without it (or disables it) has no veto, no dialog, and no pill. The preset row covers that case, one preset at a time.
+- **The pill's reassurance is derived, not promised.** `Cache: ask` means the process guards at least one engine; a fresh session confirms it after its first step, when the live context line appears. `Cache: not armed` is the honest answer when nothing is guarded.
+- **A pricing failure spends rather than strands.** If the guard cannot price an operation it hands the operation to the engine and says so in the log. That is the same cache cost the session would have paid without the plugin — deliberately chosen over declining every rewrite in every session.
 - **A profile with no question provider blocks rather than spends.** With `mode: manual` and nothing to ask, the guard declines and logs it; the session then runs to its window limit. Use `mode: auto` for a headless profile's row.
 - **Everything but the harness vocabulary is English.** Code, comments, docs, dialog copy, and the pill are English; only the harness terms the guard reports (`compaction/prune`, `thresholdRatio`, `retainRatio`) keep their upstream spelling.
 

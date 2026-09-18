@@ -1,6 +1,6 @@
 {
   "name": "dsh-cache-guard",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Host- and agent-layer DeepSeek Harness plugin that prices every automatic context rewrite before it lands, asks the human by default, and reports what the provider had to re-read cold.",
   "author": "loonylabs-dev <info@loonylabs.dev>",
   "repository": {
@@ -49,7 +49,7 @@
   "scripts": {
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "node --test test/imports.test.mjs test/cold-cost.test.mjs test/plan.test.mjs test/gate.test.mjs test/routes.test.mjs test/client.test.mjs",
-    "test:integration": "node --test test/real-engine.test.mjs test/preset-composition.test.mjs",
+    "test:integration": "node --test test/real-engine.test.mjs test/global-gate.test.mjs test/preset-composition.test.mjs",
     "install:profile": "node tools/install-profile.mjs",
     "simulate": "node tools/simulate-session.mjs",
     "prepublishOnly": "npm test"

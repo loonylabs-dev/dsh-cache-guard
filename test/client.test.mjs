@@ -97,4 +97,14 @@ describe('browser half', () => {
     assert.match(source, /\/cache-guard\/state\?session=/)
     assert.match(source, /\/cache-guard\/mode/)
   })
+
+  it('tells protection apart from the absence of it', () => {
+    // The pill promised "every automatic rewrite waits for your approval" in a
+    // session that had no guarded engine at all. It now reads the host's reach
+    // and says so instead.
+    assert.match(source, /state\.engines/, 'the pill must read how many engines are guarded')
+    assert.match(source, /Cache: not armed/)
+    assert.match(source, /No guarded compaction engine in this process/)
+    assert.match(source, /mode: 'off'/, 'and it must offer the way out')
+  })
 })
