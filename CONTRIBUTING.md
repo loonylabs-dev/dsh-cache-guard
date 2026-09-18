@@ -69,6 +69,22 @@ Thematic commits. The subject is a claim, the body carries the measurement that 
 
 `fix: read the routed model from the request header — the engine does, and a switch priced the wrong target`
 
+## Version and changelog
+
+`CHANGELOG.md` is part of a change, not a release chore: a commit that alters
+behavior, output, or the public surface updates it in the same commit, and the
+entry leads with the claim the change makes rather than with the file it touched.
+
+The version says which kind of change it was:
+
+| Change | Bump |
+|---|---|
+| A feature addition | minor — `0.x.0` |
+| A fix, a documentation change, a test change, a manifest change | patch — `0.0.x` |
+
+`prepublishOnly` runs `npm test`, so the publish path is the release gate: a red
+suite publishes nothing.
+
 ## Everything in English
 
 Code, comments, docs, dialog copy, and commit messages are English. Only harness vocabulary the plugin reports keeps its upstream spelling.

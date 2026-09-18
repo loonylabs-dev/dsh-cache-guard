@@ -11,6 +11,10 @@ rules that bind every session and were paid for once.
 - `npm run test:unit` needs no harness packages; `npm run test:integration` does.
 - Verify a real installation with `node tools/install-profile.mjs --dry-run`, and
   price a real session with `npm run simulate <sessionId>`.
+- **A behavior change updates `CHANGELOG.md` in the same commit**, newest version
+  first, claim-first prose in the house style. The version says which kind it was:
+  a feature addition bumps the minor (`0.x.0`), anything else — fix, documentation,
+  tests, manifest — the patch (`0.0.x`).
 
 ## Hard rules, each one paid for
 
