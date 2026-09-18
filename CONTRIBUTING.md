@@ -33,6 +33,7 @@ Five rules govern changes to this repository:
 | `lib/preset-file.js` | the guarded preset's composition text |
 | `tools/install-profile.mjs` | profile checks, preset generation, default preset |
 | `tools/simulate-session.mjs` | price a real session's first automatic rewrite |
+| `tools/verify-preset.mjs` | compose a preset file through a real Loader and print what it contains |
 
 ## Testing
 

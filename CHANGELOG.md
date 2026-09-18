@@ -4,6 +4,20 @@ Notable changes to `dsh-cache-guard`, newest first. A feature addition bumps the
 minor (`0.x.0`); a fix, a documentation change, or a manifest change bumps the
 patch (`0.0.x`).
 
+## Unreleased
+
+### Added
+
+- **`tools/verify-preset.mjs` composes a preset file through a real Loader and
+  prints what it contains**: every row, the `compaction` group's children, and the
+  config the engine row carries. Reading the file answers neither question a config
+  change raises — whether the threshold actually reaches `compaction-basic`, and
+  whether the engine row is still inside the group — and a preset that fails to
+  compose fails at session start, not at boot. Rows mount as stubs, so the check
+  needs no service, no model, and no running server. Used on 2026-09-18 to confirm
+  that this machine's `cache-guard` and `studio` presets both carry
+  `thresholdRatio: 0.9` on the engine row.
+
 ## 0.3.0
 
 ### Fixed

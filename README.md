@@ -203,10 +203,13 @@ node tools/install-profile.mjs --threshold 0.9
 npm test                                   # unit and contract tests
 node tools/simulate-session.mjs 02abdc01   # price a real session's first automatic rewrite
 node tools/install-profile.mjs --dry-run   # show what the installer would change
+node tools/verify-preset.mjs ~/.dsh/.agent-presets/cache-guard/agent.cordis.yml
 dsh web --dump-config | Select-String cache-guard
 ```
 
 `tools/simulate-session.mjs` truncates a real session log to the moment before its first automatic rewrite, rebuilds a real `Session`, prices the pending plan through the real token meter and the real pruner, and compares the prediction with the provider usage the log recorded afterwards. On the session above it predicted 28 rewrites, the first change at surface position 8, and 724,447 cold tokens — against 28 rewrites and 720,764 actual full-price tokens: **0.5 % off**.
+
+`tools/verify-preset.mjs` composes a preset file through a real Loader and prints what it contains — every row, the `compaction` group's children, and the config the engine row carries. It answers the question a config change raises and a file read does not: does the threshold this profile defaults to actually reach `compaction-basic`, and is the engine row still inside the group. Rows mount as stubs, so it needs no service, no model, and no running server.
 
 ## Known Limitations
 
