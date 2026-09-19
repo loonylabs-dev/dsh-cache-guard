@@ -4,7 +4,7 @@ Notable changes to `dsh-cache-guard`, newest first. A feature addition bumps the
 minor (`0.x.0`); a fix, a documentation change, or a manifest change bumps the
 patch (`0.0.x`).
 
-## Unreleased
+## 0.4.0
 
 ### Added
 
@@ -17,6 +17,28 @@ patch (`0.0.x`).
   needs no service, no model, and no running server. Used on 2026-09-18 to confirm
   that this machine's `cache-guard` and `studio` presets both carry
   `thresholdRatio: 0.9` on the engine row.
+
+### Fixed
+
+- **The mode menu no longer renders behind the middle column in the studio.** The
+  open menu was `position: absolute` inside the composer dock, so it answered to
+  the conversation column that holds that dock — and that column both clamps its
+  own overflow while a session is active and forms its own stacking context. The
+  studio's middle column painted over the menu and clipped it at the column's
+  edge, which the user read as "the menu opens behind the middle part instead of
+  on top". No `z-index` wins that: a clip is not a stacking question, and the
+  column's own stacking index sits below the middle column's regardless. The menu
+  now portals to `<body>` and is placed in viewport coordinates from the pill's
+  own rect, so it floats above every column and stays on screen. The same fix
+  `dsh-model-chooser` 0.1.2 made to its picker panel for the identical read.
+  The placement and the portal are pinned in `test/client.test.mjs` (red against
+  the shipped `position: absolute` bundle, green with this change).
+- **The open menu now closes when you click outside it.** Before, it closed only
+  by the pill/chevron or a menu row — clicking empty space beside it did nothing.
+  The menu now sits over a transparent full-screen backdrop (portaled to
+  `<body>`, `z-index` just under the menu) whose click closes the menu, the way
+  the model chooser's panel behaves. A click on the menu itself still lands on it.
+  Pinned in `test/client.test.mjs`.
 
 ## 0.3.0
 

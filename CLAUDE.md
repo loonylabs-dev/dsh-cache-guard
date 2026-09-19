@@ -6,7 +6,7 @@ rules that bind every session and were paid for once.
 
 ## Start of session
 
-- The gate is `npm test` (75 tests, seconds). Green before AND after a change;
+- The gate is `npm test` (77 tests, seconds). Green before AND after a change;
   nothing gets committed on a red or unrun gate.
 - `npm run test:unit` needs no harness packages; `npm run test:integration` does.
 - Verify a real installation with `node tools/install-profile.mjs --dry-run`, and

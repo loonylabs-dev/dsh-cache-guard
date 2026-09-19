@@ -32,8 +32,8 @@ describe('browser half', () => {
 
   it('exports the function-plugin shape the loader expects', () => {
     const plugin = captured[0].factory(specifier => {
-      assert.equal(specifier, 'react')
-      return fakeReact
+      if (specifier === 'react' || specifier === 'react-dom') return fakeReact
+      throw new Error('unexpected require: ' + specifier)
     })
     assert.equal(plugin.name, 'dsh-cache-guard')
     assert.deepEqual(plugin.inject, ['slots'])
@@ -96,6 +96,39 @@ describe('browser half', () => {
   it('reads the session id from its own request and never a hardcoded one', () => {
     assert.match(source, /\/cache-guard\/state\?session=/)
     assert.match(source, /\/cache-guard\/mode/)
+  })
+
+  it('floats the menu out of the composer through a <body> portal', () => {
+    // The studio bug: the menu was `position: absolute` inside the composer
+    // dock, so the conversation column both clipped it and lost the stacking race
+    // to the middle column — the user read it as "the menu is behind the preview".
+    // The same fix dsh-model-chooser 0.1.2 made to its picker panel. A clip is
+    // not a stacking question, so no z-index wins it; the menu must leave the
+    // composer's subtree for <body> and be placed in viewport coordinates.
+    assert.match(source, /ReactDOM\.createPortal\(el, document\.body\)/,
+      'the menu must portal to <body>')
+    assert.match(source, /\.cg-menu \{ position: fixed/,
+      'the menu must be position: fixed, never absolute inside the column')
+    assert.doesNotMatch(source, /\.cg-menu \{ position: absolute/,
+      'the menu must not stay absolutely positioned in the composer subtree')
+    assert.match(source, /portalOrInline\(React\.createElement\('div', \{[\s\S]*?className: 'cg-menu'/,
+      'the menu element is rendered through the portal helper')
+    assert.match(source, /measureMenuStyle\(pillRef\.current\)/,
+      'the menu is placed in viewport coordinates from the pill\'s own rect')
+    assert.match(source, /useLayoutEffect[\s\S]*?'resize'[\s\S]*?'scroll'/,
+      'the menu re-measures when the window or conversation moves under it')
+  })
+
+  it('closes the menu when a click lands outside it (the chooser backdrop)', () => {
+    // Without a catch layer the menu only closed via the pill/chevron or a menu
+    // item; clicking empty space did nothing. The model chooser solves this with a
+    // full-screen transparent backdrop under the menu; the guard mirrors it.
+    assert.match(source, /\.cg-backdrop \{ position: fixed; inset: 0/,
+      'a full-screen backdrop layer must exist')
+    assert.match(source, /className: 'cg-backdrop'[\s\S]*?onClick: \(\) => setOpen\(false\)/,
+      'a click on the backdrop closes the menu')
+    assert.match(source, /portalOrInline\(React\.createElement\('button', \{[\s\S]*?className: 'cg-backdrop'/,
+      'the backdrop is portaled to <body> with the menu, so a neighbouring column cannot out-click it')
   })
 
   it('tells protection apart from the absence of it', () => {

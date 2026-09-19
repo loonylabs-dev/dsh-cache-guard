@@ -17,6 +17,69 @@ window.__ModuleLoader__.load({
     const exports = module.exports
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const React = require('react')
+    // react-dom is available in the harness module system and is needed for the
+    // menu portal; if it ever is not, the menu falls back to inline rendering.
+    let ReactDOM = null
+    try { ReactDOM = require('react-dom') } catch { ReactDOM = null }
+
+    /**
+     * Render a floating element into `<body>` when the harness provides react-dom.
+     *
+     * The guard's pill lives in the composer dock, and everything anchored there
+     * has to leave that subtree to float reliably above the rest of the UI. The
+     * column that holds the composer clamps its own overflow while a session is
+     * active (measured in the game studio: DSH's conversation root cuts the open
+     * menu away at its edge), and the column also forms its own stacking context,
+     * so the studio's middle column paints over the menu however high its
+     * `z-index` is inside the column — a clip is not a stacking question, and no
+     * z-index wins either one. This mirrors the same fix `dsh-model-chooser` 0.1.2
+     * made to its picker panel for the identical "menu is behind the preview" read.
+     */
+    function portalOrInline(el) {
+      if (ReactDOM && typeof document !== 'undefined' && document.body) {
+        return ReactDOM.createPortal(el, document.body)
+      }
+      return el
+    }
+
+    /**
+     * The style a menu anchored to `rect` needs, in VIEWPORT coordinates. It is
+     * fixed on purpose — an absolutely positioned menu answers to the wrong
+     * containing block the moment it is portaled — and it keeps the anchor's
+     * right edge and opens 8px above the anchor's top edge, so it always stays
+     * on screen.
+     * @param rect - the anchor's viewport rect, or null when there is none.
+     * @param vw - viewport width in px.
+     * @param vh - viewport height in px.
+     * @returns {{position: string, right: number, bottom: number, width: number}|null}
+     *   `right`/`bottom` are offsets from the viewport's right/bottom edges.
+     */
+    function menuStyleFor(rect, vw, vh) {
+      if (!rect) return null
+      const margin = 8
+      const width = Math.min(264, Math.max(0, vw - 2 * margin))
+      const right = Math.min(Math.max(margin, vw - rect.right), Math.max(margin, vw - margin - width))
+      const bottom = Math.min(Math.max(margin, vh - rect.top + 8), Math.max(margin, vh - margin - 320))
+      return {
+        position: 'fixed',
+        right: Math.round(right),
+        bottom: Math.round(bottom),
+        width: Math.round(width),
+      }
+    }
+
+    /**
+     * menuStyleFor() for a live anchor node.
+     * @param anchor - the element the menu hangs off, or null.
+     * @returns the style, or null when there is no anchor to measure.
+     */
+    function measureMenuStyle(anchor) {
+      if (!anchor || typeof anchor.getBoundingClientRect !== 'function') return null
+      const win = globalThis.window
+      const vw = win && win.innerWidth ? win.innerWidth : 1200
+      const vh = win && win.innerHeight ? win.innerHeight : 800
+      return menuStyleFor(anchor.getBoundingClientRect(), vw, vh)
+    }
 
     const STYLE_ID = 'cg-styles'
     const POLL_MS = 4_000
@@ -71,7 +134,18 @@ window.__ModuleLoader__.load({
       '.cg-readout { padding: 6px 9px 2px; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-secondary); white-space: normal; }',
       '.cg-readout.dim { padding-top: 0; padding-bottom: 6px; color: var(--dsw-alias-label-tertiary); border-bottom: 1px solid var(--dsw-alias-border-l2); margin-bottom: 4px; }',
       '.cg-readout.warn { padding-bottom: 4px; color: var(--dsw-alias-state-warn-primary); }',
-      '.cg-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: 264px; padding: 4px; border: 1px solid var(--dsw-alias-border-inverted); border-radius: 12px; box-shadow: var(--dsw-shadow-lv3); background: var(--dsw-specific-menu); color: var(--dsw-alias-label-primary); }',
+      // Transparent full-screen catch layer behind the open menu: a click anywhere
+      // outside it closes the menu, the way the model chooser's backdrop does. It
+      // sits just under the menu (z-index 19 vs the menu's 20) so the menu itself
+      // stays clickable, and is portaled to <body> with the menu so the composer
+      // column can neither clip it nor let a neighbouring column out-click it.
+      '.cg-backdrop { position: fixed; inset: 0; z-index: 19; background: transparent; border: none; padding: 0; margin: 0; cursor: default; }',
+      // The menu floats OUTSIDE the composer: it is portaled to <body> and placed
+      // in viewport coordinates (menuStyleFor), because anchored in the composer
+      // the open menu is clipped by the column that holds it and loses to the
+      // studio's middle column in stacking — see portalOrInline. The right/
+      // bottom here are the fallback for a menu that has no measurement.
+      '.cg-menu { position: fixed; right: 12px; bottom: 12px; z-index: 20; width: 264px; padding: 4px; border: 1px solid var(--dsw-alias-border-inverted); border-radius: 12px; box-shadow: var(--dsw-shadow-lv3); background: var(--dsw-specific-menu); color: var(--dsw-alias-label-primary); }',
       // Rows follow the harness Menu: 8px gap between leading glyph, label, and a
       // trailing check for the selection — the selection is never a color fill.
       '.cg-item { display: flex; align-items: flex-start; gap: 8px; width: 100%; box-sizing: border-box; padding: 8px 10px; border: none; border-radius: 10px; background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 20px; text-align: left; cursor: pointer; }',
@@ -199,6 +273,36 @@ window.__ModuleLoader__.load({
         const timer = setInterval(() => face.refresh(), POLL_MS)
         return () => clearInterval(timer)
       }, [face])
+      // The open menu is portaled to <body> and placed in viewport coordinates, so
+      // it is measured from the pill on every render — and re-measured when the
+      // window or the conversation moves under it. The tick value is never read:
+      // it exists only to force that re-render.
+      const pillRef = React.useRef(null)
+      const [, setAnchorTick] = React.useState(0)
+      React.useLayoutEffect(() => {
+        if (!open) return
+        const win = globalThis.window
+        if (!win || typeof win.addEventListener !== 'function') return
+        // Only a real move re-renders: a scroll event that leaves the pill where
+        // it was must not cost a re-render.
+        let last = ''
+        const onMove = () => {
+          const anchor = pillRef.current
+          const rect = anchor && typeof anchor.getBoundingClientRect === 'function'
+            ? anchor.getBoundingClientRect()
+            : null
+          const key = rect === null ? '' : [rect.left, rect.top, rect.right, rect.bottom].join(',')
+          if (key === last) return
+          last = key
+          setAnchorTick(t => t + 1)
+        }
+        win.addEventListener('resize', onMove)
+        win.addEventListener('scroll', onMove, true)
+        return () => {
+          win.removeEventListener('resize', onMove)
+          win.removeEventListener('scroll', onMove, true)
+        }
+      }, [open])
 
       const mode = state === null ? null : state.mode
       /**
@@ -233,6 +337,7 @@ window.__ModuleLoader__.load({
       const children = [
         React.createElement('button', {
           key: 'pill',
+          ref: pillRef,
           type: 'button',
           className: mode === 'auto' || inert ? 'cg-pill auto' : 'cg-pill',
           'aria-label': `${label} — ${action}`,
@@ -251,7 +356,23 @@ window.__ModuleLoader__.load({
         }, glyph([CHEVRON_PATH]))),
       ]
       if (open) {
-        children.unshift(React.createElement('div', { key: 'menu', className: 'cg-menu', role: 'menu' },
+        const menuStyle = measureMenuStyle(pillRef.current)
+        // Catch layer first: a click outside the menu hits it and closes. Portaled
+        // to <body> with the menu (z-index 19, under the menu's 20) so the open
+        // menu stays clickable and no neighbouring column steals the click.
+        children.unshift(portalOrInline(React.createElement('button', {
+          key: 'backdrop',
+          type: 'button',
+          className: 'cg-backdrop',
+          'aria-label': 'Close the cache-guard menu',
+          onClick: () => setOpen(false),
+        })))
+        children.unshift(portalOrInline(React.createElement('div', {
+          key: 'menu',
+          className: 'cg-menu',
+          role: 'menu',
+          style: menuStyle,
+        },
           inert || mode === 'off'
             ? React.createElement('div', { className: 'cg-readout warn' }, reach)
             : null,
@@ -275,7 +396,7 @@ window.__ModuleLoader__.load({
             selected
               ? React.createElement('span', { className: 'cg-item-check', 'aria-hidden': true }, glyph([CHECK_PATH], 16))
               : null)
-          })))
+          }))))
       }
       return React.createElement('div', { className: 'cg-wrap' }, children)
     }

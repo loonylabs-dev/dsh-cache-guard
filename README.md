@@ -85,6 +85,8 @@ And a chip in the composer's tool row — inside the input card, right after the
 
 Its menu rows follow the harness `Menu`: a leading 16px glyph, the label with its hint, and a trailing check for the selected row — the selection is a check, never a colour fill, exactly as in the neighbouring menus.
 
+The menu floats above every column: it is portaled to the document body and placed in viewport coordinates from the chip, so a studio's wider columns can neither clip it nor cover it. Opening and closing follow the same rule as the model chooser — the chip's chevron toggles it, and a click anywhere outside the menu closes it.
+
 The long sentence also sits in the chip's tooltip, so hovering shows it without opening the menu. The host keeps the chosen mode per session.
 
 ## Where It Is Active
