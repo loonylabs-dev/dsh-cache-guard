@@ -1,6 +1,6 @@
 {
   "name": "dsh-cache-guard",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Host- and agent-layer DeepSeek Harness plugin that prices every automatic context rewrite before it lands, asks the human by default, and reports what the provider had to re-read cold.",
   "author": "loonylabs-dev <info@loonylabs.dev>",
   "repository": {
